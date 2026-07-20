@@ -1,0 +1,141 @@
+# frozen_string_literal: true
+
+RSpec.describe Denise::Config do
+  subject(:config) { described_class.new }
+
+  describe "#add_source" do
+    it "aliases a source with the provider's default alias" do
+      alias_name = config.add_source(provider: "dreamhost", token: "t1")
+
+      expect(alias_name).to eq("dh")
+      expect(config.token_for("dh")).to eq("t1")
+    end
+
+    it "makes the first source the default automatically" do
+      config.add_source(provider: "dreamhost", token: "t1")
+      config.add_source(provider: "cloudflare", token: "t2")
+
+      expect(config.default_source_alias).to eq("dh")
+    end
+
+    it "auto-suffixes the default alias when it is already taken" do
+      config.add_source(provider: "dreamhost", token: "t1")
+      second = config.add_source(provider: "dreamhost", token: "t2")
+
+      expect(second).to eq("dh2")
+    end
+
+    it "rejects an explicit alias that is already in use" do
+      config.add_source(provider: "dreamhost", token: "t1", alias_name: "dh")
+
+      expect do
+        config.add_source(provider: "cloudflare", token: "t2", alias_name: "dh")
+      end.to raise_error(Denise::AliasConflictError)
+    end
+
+    it "rejects an unknown provider" do
+      expect do
+        config.add_source(provider: "hostgator", token: "t1")
+      end.to raise_error(Denise::UnknownProviderError)
+    end
+
+    it "honors an explicit default: true even when it is not the first source" do
+      config.add_source(provider: "dreamhost", token: "t1")
+      config.add_source(provider: "cloudflare", token: "t2", default: true)
+
+      expect(config.default_source_alias).to eq("cf")
+    end
+
+    it "encrypts the token at rest" do
+      config.add_source(provider: "dreamhost", token: "super-secret")
+
+      raw = File.read(Denise::Paths.config_file)
+      expect(raw).not_to include("super-secret")
+    end
+  end
+
+  describe "#remove_source" do
+    it "falls back the default to another source when the default is removed" do
+      config.add_source(provider: "dreamhost", token: "t1")
+      config.add_source(provider: "cloudflare", token: "t2")
+
+      config.remove_source("dh")
+
+      expect(config.default_source_alias).to eq("cf")
+    end
+
+    it "raises for an unknown alias" do
+      expect { config.remove_source("nope") }.to raise_error(Denise::UnknownSourceError)
+    end
+  end
+
+  describe "zones" do
+    before { config.add_source(provider: "dreamhost", token: "t1", alias_name: "dh") }
+
+    it "adds and lists zones for a source" do
+      config.add_zone("example.com", provider_alias: "dh")
+
+      expect(config.list_zones(provider_alias: "dh")).to eq([{ alias: "dh", name: "example.com" }])
+    end
+
+    it "rejects a duplicate zone under the same source" do
+      config.add_zone("example.com", provider_alias: "dh")
+
+      expect do
+        config.add_zone("example.com", provider_alias: "dh")
+      end.to raise_error(Denise::ZoneConflictError)
+    end
+
+    it "reports every source that owns a zone name" do
+      config.add_source(provider: "cloudflare", token: "t2", alias_name: "cf")
+      config.add_zone("shared.com", provider_alias: "dh")
+      config.add_zone("shared.com", provider_alias: "cf")
+
+      expect(config.sources_for_zone("shared.com")).to contain_exactly("dh", "cf")
+    end
+
+    it "removes a zone" do
+      config.add_zone("example.com", provider_alias: "dh")
+
+      config.remove_zone("example.com", provider_alias: "dh")
+
+      expect(config.list_zones(provider_alias: "dh")).to eq([])
+    end
+  end
+
+  describe "entries" do
+    before do
+      config.add_source(provider: "dreamhost", token: "t1", alias_name: "dh")
+      config.add_zone("example.com", provider_alias: "dh")
+    end
+
+    it "adds and lists entries for a zone" do
+      config.add_entry("example.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4", ttl: 300)
+
+      entries = config.list_entries("example.com", provider_alias: "dh")
+      expect(entries).to eq([{ "name" => "www", "type" => "A", "value" => "1.2.3.4", "ttl" => 300 }])
+    end
+
+    it "removes a matching entry" do
+      config.add_entry("example.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
+
+      config.remove_entry("example.com", provider_alias: "dh", name: "www", type: "A")
+
+      expect(config.list_entries("example.com", provider_alias: "dh")).to eq([])
+    end
+
+    it "raises for an unknown entry" do
+      expect do
+        config.remove_entry("example.com", provider_alias: "dh", name: "missing", type: "A")
+      end.to raise_error(Denise::UnknownEntryError)
+    end
+  end
+
+  it "persists across instances" do
+    config.add_source(provider: "dreamhost", token: "t1")
+
+    reloaded = described_class.new
+    expect(reloaded.default_source_alias).to eq("dh")
+    expect(reloaded.token_for("dh")).to eq("t1")
+  end
+end
