@@ -37,3 +37,54 @@ source with `-p ALIAS`, or every configured source if `-p` is omitted.
 Pass `-v`/`--verbose` (after the command, e.g. `denise refresh-zones -v`) to
 print each HTTP request and response status to stderr. Tokens and secrets
 are never included, however verbose you get.
+
+Shell completions
+------------------
+
+`denise --completions` prints a completion script for commands and flags
+(detected from `$SHELL` by default, or pass `bash`/`zsh` explicitly).
+
+### Bash
+
+Add this line to `~/.bashrc` (or `~/.bash_profile` on macOS), then restart
+your shell or `source` it:
+
+```sh
+eval "$(denise --completions bash)"
+```
+
+Or, if your system has `bash-completion` installed, drop the script into
+its directory instead — the path varies by system, e.g.
+`/etc/bash_completion.d/denise` on Linux, or via Homebrew on macOS:
+
+```sh
+denise --completions bash > "$(brew --prefix)/etc/bash_completion.d/denise"
+```
+
+### Zsh
+
+Add these lines to `~/.zshrc`, then restart your shell or `source` it:
+
+```sh
+eval "$(denise --completions zsh)"
+compdef _denise denise
+```
+
+Or, the more conventional zsh way: save the script into a directory on your
+`fpath` and let `compinit` autoload it (it already starts with the
+`#compdef denise` line that requires):
+
+```sh
+mkdir -p ~/.zsh/completions
+denise --completions zsh > ~/.zsh/completions/_denise
+```
+
+Then, in `~/.zshrc`, add that directory to `fpath` *before* `compinit` runs:
+
+```sh
+fpath=(~/.zsh/completions $fpath)
+autoload -Uz compinit && compinit
+```
+
+Either way, `denise <TAB>` should suggest commands, and `denise add-entry
+<TAB>` should suggest that command's flags.
