@@ -27,7 +27,7 @@ A thrown together simple DNS manager for hobbyists, written in Ruby.
 - `thor` for the CLI
 - `faraday` for provider HTTP APIs (not yet wired up — see Roadmap)
 - `tomlib` for TOML config read/write
-- `rspec` for tests, `rubocop` for linting
+- `rspec` for tests, `rubocop` for linting, `bundler-audit` for dependency vulnerability scanning
 - `base64` and `reline` are pulled in explicitly since they stopped being Ruby default gems as of 3.4/4.0
 
 ## Configuration
@@ -78,10 +78,19 @@ dispatch, so `denise add-provider` and the `desc` help text both show the hyphen
 
 ## Conventions
 
-- Run `bundle exec rspec` for tests and `bundle exec rubocop` for lint before considering work done.
+- **Test everything.** Every new module, command, or behavior change needs RSpec coverage in `spec/` before
+  it's considered done — not just the happy path, but conflict/error cases (see the alias-conflict,
+  ambiguous-zone, and unknown-* examples in the existing specs as the bar to match). Before finishing any
+  piece of work, run `bundle exec rspec` and `bundle exec rubocop`; both must be clean.
 - `Style/StringLiterals` is configured for double-quoted strings project-wide.
 - New provider integrations belong under `lib/denise/providers/` behind a shared interface (not yet created —
   only the alias registry exists so far).
+- **7-day age gate on new Gemfile dependencies.** Before adding any gem, check its release date on
+  rubygems.org (`https://rubygems.org/api/v1/versions/<gem>.json`) and pin the Gemfile to the newest version
+  that is at least 7 days old as of the current date (exact pin, e.g. `gem "rubocop", "1.88.2"`, not `~>`).
+  This guards against a supply-chain attack landing in a brand-new release before it's had time to be
+  scrutinized. Run `bundle exec bundler-audit check --update` periodically (and after any Gemfile change) to
+  catch known CVEs in whatever's actually installed.
 
 ## Roadmap / explicitly deferred
 

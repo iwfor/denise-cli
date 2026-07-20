@@ -4,6 +4,9 @@ GEM
     ast (2.4.3)
     base64 (0.3.0)
     bigdecimal (4.1.2)
+    bundler-audit (0.9.3)
+      bundler (>= 1.2.0)
+      thor (~> 1.0)
     diff-lcs (1.6.2)
     faraday (2.14.3)
       faraday-net_http (>= 2.0, < 3.5)
@@ -70,10 +73,11 @@ PLATFORMS
 
 DEPENDENCIES
   base64
+  bundler-audit (= 0.9.3)
   faraday
   reline
   rspec
-  rubocop
+  rubocop (= 1.88.2)
   thor
   tomlib (~> 0.7.3)
 
