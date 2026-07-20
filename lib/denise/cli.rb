@@ -23,6 +23,20 @@ module Denise
       super
     end
 
+    # Thor's own "Did you mean?" suggestions are built from its internal command
+    # registry, which uses underscored method names (`list_records`), not the
+    # hyphenated form every command is actually invoked with (`list-records`).
+    # Translate the dictionary before Thor raises, so a typo like `list-source`
+    # suggests something the user can actually type.
+    # rubocop:disable Style/GlobalVars -- must match Thor's own
+    # handle_no_command_error(command, has_namespace = $thor_runner) signature exactly.
+    def self.handle_no_command_error(command, has_namespace = $thor_runner)
+      raise UndefinedCommandError.new(command,
+                                      all_commands.keys.map { |name| name.tr("_", "-") },
+                                      (namespace if has_namespace))
+    end
+    # rubocop:enable Style/GlobalVars
+
     class_option :provider, aliases: "-p", desc: "Source alias to operate on (defaults to the default provider)"
     class_option :verbose, aliases: "-v", type: :boolean, default: false,
                            desc: "Print HTTP requests/responses to providers (never includes tokens or secrets)"

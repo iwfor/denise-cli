@@ -489,4 +489,15 @@ RSpec.describe Denise::CLI do
       expect(output).to include("Add a DNS record to a zone")
     end
   end
+
+  describe "an unknown command" do
+    it "suggests the hyphenated command form, not Thor's internal underscored method name" do
+      output = capture_stderr do
+        expect { described_class.start(%w[list-record]) }.to raise_error(SystemExit)
+      end
+
+      expect(output).to include('"list-records"')
+      expect(output).not_to include("list_records")
+    end
+  end
 end
