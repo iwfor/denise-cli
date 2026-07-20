@@ -180,9 +180,16 @@ dispatch, so `denise add-provider` and the `desc` help text both show the hyphen
 `CLI#help` overrides Thor's built-in `help` command (matching its `(command = nil, subcommand = false)`
 signature exactly, since Thor calls it positionally via both `super` and its own internal dispatch — see the
 `rubocop:disable Style/OptionalBooleanParameter` comment). With no command given it prints a one-line tool
-description and, after `super`, a "Global flags" section documenting `--completions` — which otherwise
-wouldn't appear anywhere in the help output, since it's intercepted in `bin/denise` before Thor ever sees it.
+description and, after `super`, a "Global flags" section documenting `--completions` and `-h`/`--help` —
+neither would otherwise appear anywhere in the help output: `--completions` is intercepted in `bin/denise`
+before Thor ever sees it, and `-h`/`--help` are just Thor's built-in `HELP_MAPPINGS` (`-h -? --help -D`,
+aliased to the `help` command) rather than a declared option, so Thor never lists them either.
 `denise help COMMAND` (a specific command) skips both additions.
+
+**`-h`/`--help` only work as the very first word** (`denise -h`, `denise --help`) — Thor's dispatch checks
+`HELP_MAPPINGS` against `argv[0]` only, so `denise add-entry --help` does *not* show `add-entry`'s help; it's
+parsed as a regular (unrecognized) option for that command instead. `Completions.top_level` documents this by
+only offering `-h`/`--help` at the top level, never inside a command's own `flags_for`.
 
 ## Conventions
 

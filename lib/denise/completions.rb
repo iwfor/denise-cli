@@ -93,8 +93,12 @@ module Denise
       ZSH
     end
 
+    # -h/--help only work as the very first word (Thor only checks
+    # HELP_MAPPINGS against argv[0] - denise add-entry --help does NOT show
+    # add-entry's help), so they belong here and not in any command's own
+    # flags_for.
     def top_level
-      commands + ["--completions"]
+      commands + ["--completions", "-h", "--help"]
     end
 
     def bash_case_branches

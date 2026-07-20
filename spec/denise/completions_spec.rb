@@ -10,6 +10,14 @@ RSpec.describe Denise::Completions do
     end
   end
 
+  describe ".top_level" do
+    it "includes every command plus --completions and -h/--help" do
+      top_level = described_class.top_level
+
+      expect(top_level).to include(*described_class.commands, "--completions", "-h", "--help")
+    end
+  end
+
   describe ".flags_for" do
     it "includes a command's own options and the global class options" do
       flags = described_class.flags_for("add-entry")
@@ -27,11 +35,11 @@ RSpec.describe Denise::Completions do
   end
 
   describe ".bash_script" do
-    it "lists every command and --completions at the top level" do
+    it "lists every command plus --completions and -h/--help at the top level" do
       script = described_class.bash_script
 
       expect(script).to include("add-entry add-provider add-zone config")
-      expect(script).to include("--completions")
+      expect(script).to include("--completions -h --help")
     end
 
     it "has a case branch offering each command's flags" do
@@ -51,11 +59,11 @@ RSpec.describe Denise::Completions do
   end
 
   describe ".zsh_script" do
-    it "lists every command and --completions at the top level" do
+    it "lists every command plus --completions and -h/--help at the top level" do
       script = described_class.zsh_script
 
       expect(script).to include("add-entry add-provider add-zone config")
-      expect(script).to include("--completions")
+      expect(script).to include("--completions -h --help")
     end
 
     it "has a case branch offering each command's flags" do

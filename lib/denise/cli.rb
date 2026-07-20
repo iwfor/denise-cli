@@ -33,7 +33,12 @@ module Denise
       return if command
 
       say "Global flags:"
-      print_table([["--completions [bash|zsh]", "Print a shell completion script (defaults to $SHELL)"]], indent: 2)
+      print_table(
+        [
+          ["--completions [bash|zsh]", "Print a shell completion script (defaults to $SHELL)"],
+          ["-h, --help", "Show this help (same as `denise help`)"]
+        ], indent: 2
+      )
     end
     # rubocop:enable Style/OptionalBooleanParameter
 
