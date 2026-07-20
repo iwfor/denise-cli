@@ -189,6 +189,13 @@ wouldn't appear anywhere in the help output, since it's intercepted in `bin/deni
 - **Test everything.** Every new module, command, or behavior change needs RSpec coverage in `spec/` before
   it's considered done — not just the happy path, but conflict/error cases (see the alias-conflict,
   ambiguous-zone, and unknown-* examples in the existing specs as the bar to match).
+- **Keep `--help` and `--completions` in sync with the CLI.** Whenever a command, flag, or option changes,
+  update its `desc`/`method_option`/`class_option` text so `denise help` stays accurate — that text is the
+  only documentation most users will ever see. `Completions.commands` (`lib/denise/completions.rb`) derives
+  the top-level command list from `CLI.commands.keys` automatically, so a new command shows up in
+  `--completions` for free; but it doesn't complete per-command options/flags today, so if that's ever added,
+  it becomes something to update by hand alongside the command definitions, not something to assume stays
+  in sync on its own.
 - **Before every commit**, run all three and don't commit unless all three are clean:
   - `bundle exec rspec`
   - `bundle exec rubocop`
