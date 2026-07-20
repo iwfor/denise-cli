@@ -46,7 +46,7 @@ module Denise
       puts @config.to_toml_without_secrets
     end
 
-    desc "add-provider PROVIDER", "Add a new provider source (cloudflare, dreamhost, aws)"
+    desc "add-provider PROVIDER", "Add a new provider source (cloudflare, dreamhost, aws) and import its zones"
     method_option :alias, desc: "Alias for this source (defaults to the provider's default alias)"
     method_option :token,
                   desc: "API token, prompted securely if omitted " \
