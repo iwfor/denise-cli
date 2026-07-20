@@ -28,5 +28,18 @@ module Denise
         raise AmbiguousRecordTypeError.new(name, matches.map { |r| r["type"] })
       end
     end
+
+    # Resolves the record remove-record is about to delete from a live
+    # `records` listing: an explicit `type` is validated against it
+    # (UnknownRecordError if nothing matches), otherwise falls back to
+    # #resolve for disambiguation. Returns the matching record hash, so the
+    # caller has its value/ttl for records.log without a second lookup.
+    def find(records, name, type)
+      type ||= resolve(records, name)
+      record = records.find { |r| r["name"] == name && r["type"] == type }
+      raise UnknownRecordError, name unless record
+
+      record
+    end
   end
 end

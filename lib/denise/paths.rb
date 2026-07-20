@@ -15,5 +15,9 @@ module Denise
     def key_file
       File.join(config_dir, "key")
     end
+
+    def records_log_file
+      File.join(config_dir, "records.log")
+    end
   end
 end

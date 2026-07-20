@@ -13,7 +13,8 @@ A thrown together simple DNS manager for hobbyists, written in Ruby.
 - `bin/denise` — CLI entry point; intercepts `--completions` before handing off to Thor
 - `lib/denise.rb` — top-level requires
 - `lib/denise/cli.rb` — Thor-based command definitions
-- `lib/denise/config.rb` — reads/writes `config.toml`; source/zone/record CRUD, alias resolution
+- `lib/denise/config.rb` — reads/writes `config.toml`; source/zone CRUD, alias resolution (records are never
+  stored here - see Provider clients below)
 - `lib/denise/crypto.rb` — key management + AES-256-GCM encrypt/decrypt for tokens
 - `lib/denise/providers.rb` — registry of known providers, their default aliases, and `client_for` factory
 - `lib/denise/providers/base.rb` — shared provider client interface
@@ -25,6 +26,9 @@ A thrown together simple DNS manager for hobbyists, written in Ruby.
 - `lib/denise/completions.rb` — bash/zsh completion script generation
 - `lib/denise/record_types.rb` — infers/resolves a record's type when `--type` is omitted (see Record type
   inference below)
+- `lib/denise/record_log.rb` — appends add/remove record changes to `records.log` (see Record change log below)
+- `lib/denise/search.rb` — supports `search`: live record queries plus local zone-name matching (see Search below)
+- `lib/denise/zone_sync.rb` — shared add-provider/refresh-zones "sync zones, report what changed" step
 - `lib/denise/errors.rb` — typed error classes, each rescued in the CLI and printed as `denise: <message>`
 - `lib/denise/version.rb` — version constant
 - `spec/` — RSpec tests (each example runs against a fresh `Dir.mktmpdir` config dir)
@@ -71,23 +75,29 @@ aliases differ.
 - The default *source* is whichever alias was added first, unless overridden with `--default` on `add-provider`
   or later via `set-default-provider`.
 
-Zones live under their source; records (name/type/value/ttl) live under their zone.
+Zones live under their source, as a plain array of zone names - denise tracks *which* zones a source manages,
+nothing more. Records are never stored in config.toml at all: `add-record`/`remove-record`/`list-records`/
+`search` all query the live provider API instead (see Provider clients and Search below). This keeps
+config.toml simple and guarantees it can never drift from what a provider actually has, at the cost of an API
+call for every record read.
 
 ### Zone import / refresh
 
 `add-provider` imports the source's zones from the live API right after creating it
-(`CLI#sync_zones_for` → `provider_client(alias).list_zones` → `Config#sync_zones`), so a source starts
-populated instead of empty. Import failure doesn't roll back the source or fail the command - it's caught and
-printed as a warning pointing at `refresh-zones`, since a bad/under-scoped token shouldn't block adding the
-source itself.
+(`CLI#sync_zones_for` → `ZoneSync.call` → `provider_client(alias).list_zones` → `Config#sync_zones`), so a
+source starts populated instead of empty. Import failure doesn't roll back the source or fail the command -
+it's caught and printed as a warning pointing at `refresh-zones`, since a bad/under-scoped token shouldn't
+block adding the source itself. `ZoneSync` (`lib/denise/zone_sync.rb`) is a small extraction shared by
+`add-provider` and `refresh-zones`, kept out of `CLI` to stay under `Metrics/ClassLength` (same pattern as
+`RecordTypes`/`Search`).
 
 `refresh-zones` re-runs the same sync: `-p ALIAS` for one source, or every configured source if `-p` is
-omitted. `Config#sync_zones(alias, live_zone_names)` diffs against the locally stored zone list - new zones
-are added with empty records, zones no longer present are dropped **along with their locally tracked
-records**, and zones present in both are left untouched (so their records survive). There's no confirmation
-prompt before removing a zone/its records, unlike `remove-provider` - this command's whole point is
+omitted. `Config#sync_zones(alias, live_zone_names)` diffs against the locally stored zone list - zones no
+longer present are dropped and new ones are added, leaving zones present in both untouched. There's no
+confirmation prompt before removing a zone, unlike `remove-provider` - this command's whole point is
 "make local state match the live API," so a removal here just means the CLI has already caught up to a
-change made at the provider, not a new destructive action of its own.
+change made at the provider, not a new destructive action of its own. (There's nothing to lose on removal
+either way - records were never stored under the zone to begin with.)
 
 When refreshing multiple sources, `refresh_zones` validates every alias exists in one pass *before* doing any
 work (so a typoed `-p` aborts cleanly), then syncs each source in a second pass where a single source's live
@@ -96,13 +106,21 @@ Style/CombinableLoops` marks this as deliberate, not an oversight).
 
 ### Provider clients
 
-`add-record`/`remove-record` call the live provider (`Denise::Providers.client_for(provider_type, token:)`) and
-only touch local config *after* the API call succeeds — a failed API call leaves local config untouched, so it
-never drifts from what's actually live. `list-records` is the one exception: it reads local config only (no
-network call), so it shows what denise has provisioned, not necessarily everything that exists in the zone
-(records created outside denise won't show up). Zones, by contrast, are actively synced from the live API by
-`add-provider`/`refresh-zones` (see above) — `list-zones` still just reads local config, but that config is
-kept in sync rather than being denise's own record of what it separately provisioned.
+Records are never stored locally (see Data model above), so `add-record`/`remove-record`/`list-records` all
+call the live provider (`Denise::Providers.client_for(provider_type, token:)`) directly:
+
+- `add-record` just calls `create_record` - there's nothing to persist afterward.
+- `list-records` calls `list_records(zone:)` and prints whatever comes back - always live, never stale, at
+  the cost of an API call every time.
+- `remove-record` calls `list_records(zone:)` first (via `RecordTypes.find` - see Record type inference below)
+  to resolve `--type` when omitted and to capture the record's value/ttl for `records.log`, then calls
+  `delete_record`.
+
+Zones, by contrast, *are* tracked locally (`Config#add_zone`/`#sync_zones`) since `-z`/`-p` resolution
+(`CLI#resolve_provider_alias`, see Provider resolution below) needs to know which source owns which zone
+without an API call per command - and a typoed `-z` should fail fast with `UnknownZoneError` rather than
+reaching the live API blind (`Config#zone?`). Zones are actively synced from the live API by
+`add-provider`/`refresh-zones` (see above); `list-zones` just reads that locally-synced list.
 
 DreamHost's `#list_zones` has no dedicated API to call: DreamHost removed its account/domain-management
 commands, leaving `dns-list_records` (which returns every record for every domain on the account, each
@@ -115,6 +133,23 @@ Every provider client subclasses `Denise::Providers::Base` and implements `creat
 nil)` accepts an injectable Faraday connection so specs can stub HTTP via `Faraday::Adapter::Test::Stubs`
 without touching the network — see `spec/denise/providers/*_spec.rb`.
 
+### Record change log (`records.log`)
+
+`Denise::RecordLog` (`lib/denise/record_log.rb`) appends one JSON line per record change to `records.log` in
+the config directory: `timestamp`, `provider`, `alias`, `action` (`add`/`remove`), `zone`, and the record's
+`name`/`type`/`value`/`ttl`. `CLI#add_record`/`#remove_record` log *after* the live provider call succeeds -
+so a failed command never leaves a log entry for a change that didn't actually happen. Since records are
+never stored locally (see Provider clients above), the record hash logged for `add-record` is built straight
+from `--name`/`--type`/`--value`/`--ttl`; for `remove-record` it's the record `RecordTypes.find` already
+pulled from the live `list_records` call to resolve `--type`, so there's no second lookup just for logging.
+
+The log is capped at `Config#log_max_records` entries (`config.toml`'s `log_max_records`, default
+`Config::DEFAULT_LOG_MAX_RECORDS` = 10000) — once exceeded, the oldest line is shifted out on every write
+rather than rotating the whole file. Like `token`/`token_encrypted`, there's no dedicated command to set it:
+hand-edit `log_max_records` into `config.toml`, and it takes effect on the next command since `RecordLog`
+reads it from the injected `Config` on every write rather than caching it. `to_toml_without_secrets` always
+shows the effective value (default or overridden), so `denise config` surfaces it even when unset.
+
 ### Record type inference (`--type`)
 
 `--type` is optional on both `add-record` and `remove-record`; the fallback lives in `Denise::RecordTypes`
@@ -123,10 +158,13 @@ without touching the network — see `spec/denise/providers/*_spec.rb`.
 - `add-record`: `RecordTypes.infer(value)` parses `--value` with `IPAddr` and returns `"A"`/`"AAAA"` for a
   valid IPv4/IPv6 address, or raises `RecordTypeRequiredError` otherwise. Only A/AAAA are inferable this way —
   a CNAME/TXT/MX value isn't a distinguishable shape, so those always need an explicit `--type`.
-- `remove-record`: `RecordTypes.resolve(records, name)` looks at the zone's locally configured records (not a
-  live query) with a matching name: exactly one match resolves silently, zero raises `UnknownRecordError`, and
-  more than one (e.g. a name with both an A and a TXT record) raises `AmbiguousRecordTypeError` asking for
-  `--type` to disambiguate.
+- `remove-record`: `RecordTypes.find(records, name, type)` takes the zone's *live* `list_records(zone:)`
+  result (records are never stored locally - see Provider clients above) and either validates an explicit
+  `type` against it, or falls back to `#resolve` when `type` is nil: a matching name resolves silently if
+  there's exactly one, zero raises `UnknownRecordError`, and more than one (e.g. a name with both an A and a
+  TXT record) raises `AmbiguousRecordTypeError` asking for `--type` to disambiguate. Either way, `#find`
+  returns the matched record hash, which `CLI#remove_record` reuses for `records.log` instead of looking it
+  up a second time.
 
 **Gotcha that already bit us once:** stubbed specs can be self-consistently wrong about the base URL if the
 bug is in how the base URL and request path are joined, because the same (buggy) construction is used on both
@@ -177,22 +215,34 @@ Used by every zone/record command via `CLI#resolve_provider_alias`, in this orde
    more than one does — the caller must disambiguate with `-p`).
 3. The configured default source (`NoProviderError` if none is set).
 
+For `add-record`/`remove-record`/`list-records` (the three that pass `zone:`), the resolved alias must
+actually have that zone tracked locally (`Config#zone?`) — `UnknownZoneError` otherwise. This is the only
+local check standing between a typoed `-z` and a live API call, since records themselves are never stored
+locally to catch it downstream (see Provider clients above).
+
 `remove-provider` is the one exception: it never falls back to the default and always requires the alias as an
 explicit positional argument, plus a confirmation prompt (skippable with `-y/--yes`).
 
 `search` is the other exception: `-p/--provider` additionally accepts the virtual alias `all`, meaning "every
-configured source" (`CLI#search_provider_aliases`), instead of resolving to a single one. Without `-p`, it
+configured source" (`Search.provider_aliases`), instead of resolving to a single one. Without `-p`, it
 still falls back to the default provider like everything else — `all` must be given explicitly.
 
 ### Search (`search QUERY`)
 
-Local-config-only (like `list-records` — no live query), case-insensitive substring search across a source's
-zone names, record names, and record values (`Config#search`, `Config::SEARCH_CATEGORIES`). `-p/--provider`
-picks which source(s) to search — a single alias, the default provider if omitted, or every source via the
-virtual alias `all` (see Provider resolution above). `--limit zones,names,values` restricts which of the three
-categories are searched (`CLI#search_categories`; unknown categories raise `InvalidSearchLimitError`). Each
-result row reports which field(s) matched (`zone`, `name`, `value`, or `name,value` if both matched on the
-same record) alongside the provider alias, zone, and (for record hits) type/value/ttl.
+Case-insensitive substring search across a source's zone names, record names, and record values
+(`Denise::Search`, `lib/denise/search.rb`). Zone-name matching is local (`Config#list_zones` - zones are
+tracked locally, see Data model above); name/value matching means records are never stored locally, so
+`Search` calls `provider_client(alias).list_records(zone:)` live for every zone in scope whenever the `names`
+or `values` category is requested — one API call per zone, skipped entirely if `--limit zones` excludes both.
+A `ProviderError` from one zone's live query is caught and warned per-zone (`denise: ALIAS/ZONE: message`),
+so one bad zone doesn't abort matches from the rest.
+
+`-p/--provider` picks which source(s) to search — a single alias, the default provider if omitted, or every
+source via the virtual alias `all` (see Provider resolution above). `--limit zones,names,values` restricts
+which of the three categories are searched (`Search.categories`; unknown categories raise
+`InvalidSearchLimitError`). Each result row reports which field(s) matched (`zone`, `name`, `value`, or
+`name,value` if both matched on the same record) alongside the provider alias, zone, and (for record hits)
+type/value/ttl.
 
 ## Commands
 
@@ -256,5 +306,3 @@ picked up automatically the way other flags are).
 ## Roadmap / explicitly deferred
 
 - Additional providers (see README TODO): GCP Cloud DNS, HostGator, Azure DNS.
-- `list-records` is local-config-only; there's no live/refresh flag to reconcile against what the provider
-  actually has.

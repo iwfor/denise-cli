@@ -12,7 +12,9 @@ require_relative "denise/crypto"
 require_relative "denise/config"
 require_relative "denise/completions"
 require_relative "denise/record_types"
+require_relative "denise/record_log"
 require_relative "denise/search"
+require_relative "denise/zone_sync"
 require_relative "denise/cli"
 
 module Denise

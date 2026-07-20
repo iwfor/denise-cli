@@ -94,6 +94,44 @@ RSpec.describe Denise::Config do
     end
   end
 
+  describe "legacy zone migration" do
+    it "flattens {name, records} zone tables from older denise versions into bare strings" do
+      write_config(<<~TOML)
+        [sources.dh]
+        provider = "dreamhost"
+        token_encrypted = "unused"
+
+          [[sources.dh.zones]]
+          name = "example.com"
+          records = []
+
+          [[sources.dh.zones]]
+          name = "example.net"
+          records = []
+      TOML
+
+      migrated = described_class.new
+
+      expect(migrated.list_zones(provider_alias: "dh")).to contain_exactly(
+        { alias: "dh", name: "example.com" }, { alias: "dh", name: "example.net" }
+      )
+      expect(migrated.zone?("example.com", provider_alias: "dh")).to be(true)
+
+      raw = File.read(Denise::Paths.config_file)
+      expect(raw).not_to include("records")
+    end
+
+    it "leaves already-flat zones untouched" do
+      config.add_source(provider: "dreamhost", token: "t1", alias_name: "dh")
+      config.add_zone("example.com", provider_alias: "dh")
+      before_contents = File.read(Denise::Paths.config_file)
+
+      described_class.new
+
+      expect(File.read(Denise::Paths.config_file)).to eq(before_contents)
+    end
+  end
+
   describe "#remove_source" do
     it "falls back the default to another source when the default is removed" do
       config.add_source(provider: "dreamhost", token: "t1")
@@ -143,6 +181,20 @@ RSpec.describe Denise::Config do
     end
   end
 
+  describe "#zone?" do
+    before { config.add_source(provider: "dreamhost", token: "t1", alias_name: "dh") }
+
+    it "is true for a zone tracked under the given source" do
+      config.add_zone("example.com", provider_alias: "dh")
+
+      expect(config.zone?("example.com", provider_alias: "dh")).to be(true)
+    end
+
+    it "is false for a zone not tracked under the given source" do
+      expect(config.zone?("example.com", provider_alias: "dh")).to be(false)
+    end
+  end
+
   describe "#sync_zones" do
     before { config.add_source(provider: "dreamhost", token: "t1", alias_name: "dh") }
 
@@ -153,9 +205,8 @@ RSpec.describe Denise::Config do
       expect(config.list_zones(provider_alias: "dh")).to eq([{ alias: "dh", name: "example.com" }])
     end
 
-    it "removes zones no longer present, dropping their records" do
+    it "removes zones no longer present" do
       config.add_zone("gone.com", provider_alias: "dh")
-      config.add_record("gone.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
 
       result = config.sync_zones("dh", [])
 
@@ -163,15 +214,13 @@ RSpec.describe Denise::Config do
       expect(config.list_zones(provider_alias: "dh")).to eq([])
     end
 
-    it "leaves zones present in both untouched, preserving their records" do
+    it "leaves zones present in both untouched" do
       config.add_zone("staying.com", provider_alias: "dh")
-      config.add_record("staying.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
 
       result = config.sync_zones("dh", ["staying.com"])
 
       expect(result).to eq(added: [], removed: [])
-      records = config.list_records("staying.com", provider_alias: "dh")
-      expect(records).to eq([{ "name" => "www", "type" => "A", "value" => "1.2.3.4" }])
+      expect(config.list_zones(provider_alias: "dh")).to eq([{ alias: "dh", name: "staying.com" }])
     end
 
     it "adds and removes in the same call" do
@@ -184,94 +233,6 @@ RSpec.describe Denise::Config do
 
     it "raises for an unknown provider alias" do
       expect { config.sync_zones("nope", []) }.to raise_error(Denise::UnknownSourceError)
-    end
-  end
-
-  describe "records" do
-    before do
-      config.add_source(provider: "dreamhost", token: "t1", alias_name: "dh")
-      config.add_zone("example.com", provider_alias: "dh")
-    end
-
-    it "adds and lists records for a zone" do
-      config.add_record("example.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4", ttl: 300)
-
-      records = config.list_records("example.com", provider_alias: "dh")
-      expect(records).to eq([{ "name" => "www", "type" => "A", "value" => "1.2.3.4", "ttl" => 300 }])
-    end
-
-    it "removes a matching record" do
-      config.add_record("example.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
-
-      config.remove_record("example.com", provider_alias: "dh", name: "www", type: "A")
-
-      expect(config.list_records("example.com", provider_alias: "dh")).to eq([])
-    end
-
-    it "raises for an unknown record" do
-      expect do
-        config.remove_record("example.com", provider_alias: "dh", name: "missing", type: "A")
-      end.to raise_error(Denise::UnknownRecordError)
-    end
-  end
-
-  describe "#search" do
-    before do
-      config.add_source(provider: "dreamhost", token: "t1", alias_name: "dh")
-      config.add_zone("example.com", provider_alias: "dh")
-      config.add_zone("staging-example.net", provider_alias: "dh")
-      config.add_record("example.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
-      config.add_record("example.com", provider_alias: "dh", name: "mail", type: "CNAME", value: "www.example.com")
-    end
-
-    it "matches a zone name" do
-      hits = config.search("staging", provider_alias: "dh")
-
-      expect(hits).to eq([{ zone: "staging-example.net", match: "zone" }])
-    end
-
-    it "matches a record name" do
-      hits = config.search("mail", provider_alias: "dh")
-
-      expect(hits).to eq([{ zone: "example.com", match: "name", name: "mail", type: "CNAME",
-                            value: "www.example.com", ttl: nil }])
-    end
-
-    it "matches a record value" do
-      hits = config.search("1.2.3.4", provider_alias: "dh")
-
-      expect(hits).to eq([{ zone: "example.com", match: "value", name: "www", type: "A", value: "1.2.3.4",
-                            ttl: nil }])
-    end
-
-    it "reports both fields matched when the query hits a record's name and value" do
-      config.add_record("example.com", provider_alias: "dh", name: "www", type: "TXT", value: "see www for info")
-
-      hits = config.search("www", provider_alias: "dh")
-
-      expect(hits).to contain_exactly(
-        { zone: "example.com", match: "name", name: "www", type: "A", value: "1.2.3.4", ttl: nil },
-        { zone: "example.com", match: "value", name: "mail", type: "CNAME", value: "www.example.com", ttl: nil },
-        { zone: "example.com", match: "name,value", name: "www", type: "TXT", value: "see www for info", ttl: nil }
-      )
-    end
-
-    it "is case-insensitive" do
-      hits = config.search("MAIL", provider_alias: "dh")
-
-      expect(hits.size).to eq(1)
-    end
-
-    it "restricts matching to the given categories" do
-      hits = config.search("www", provider_alias: "dh", categories: %w[values])
-
-      expect(hits).to eq(
-        [{ zone: "example.com", match: "value", name: "mail", type: "CNAME", value: "www.example.com", ttl: nil }]
-      )
-    end
-
-    it "raises for an unknown provider alias" do
-      expect { config.search("www", provider_alias: "nope") }.to raise_error(Denise::UnknownSourceError)
     end
   end
 
@@ -309,7 +270,6 @@ RSpec.describe Denise::Config do
     it "omits token_encrypted while keeping everything else" do
       config.add_source(provider: "dreamhost", token: "super-secret", alias_name: "dh", default: true)
       config.add_zone("example.com", provider_alias: "dh")
-      config.add_record("example.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
 
       toml = config.to_toml_without_secrets
 
@@ -317,8 +277,23 @@ RSpec.describe Denise::Config do
       expect(toml).not_to include("token_encrypted")
       expect(toml).to include('default_source = "dh"')
       expect(toml).to include('provider = "dreamhost"')
-      expect(toml).to include('name = "example.com"')
-      expect(toml).to include('value = "1.2.3.4"')
+      expect(toml).to include('zones = [ "example.com" ]')
+    end
+
+    it "includes the effective log_max_records even when unset" do
+      expect(config.to_toml_without_secrets).to include("log_max_records = 10000")
+    end
+  end
+
+  describe "#log_max_records" do
+    it "defaults to 10000 when not set in config.toml" do
+      expect(config.log_max_records).to eq(10_000)
+    end
+
+    it "honors a hand-edited log_max_records" do
+      write_config("log_max_records = 500\n\n[sources]\n")
+
+      expect(described_class.new.log_max_records).to eq(500)
     end
   end
 end

@@ -34,6 +34,17 @@ manages at the provider. Run `denise refresh-zones` any time afterward to
 pick up zones added or removed at the provider since — for a specific
 source with `-p ALIAS`, or every configured source if `-p` is omitted.
 
+Only zones are tracked in `config.toml` — DNS records themselves are never
+stored locally. `list-records`, `search`, and `remove-record`'s automatic
+`--type` detection all query the provider live, so they always reflect
+what's actually there (at the cost of an API call).
+
+Every `add-record`/`remove-record` is logged as one JSON line (timestamp,
+provider, alias, action, and the record) to `~/.config/denise-cli/records.log`.
+It's capped at `log_max_records` entries (default 10000, hand-editable in
+`config.toml`) — past the cap, the oldest entry is shifted out rather than
+rotating the whole file.
+
 Pass `-v`/`--verbose` (after the command, e.g. `denise refresh-zones -v`) to
 print each HTTP request and response status to stderr. Tokens and secrets
 are never included, however verbose you get.

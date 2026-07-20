@@ -5,10 +5,16 @@ require "fileutils"
 
 module Denise
   # Reads and writes ~/.config/denise-cli/config.toml: sources (provider
-  # instances, each with a unique alias and an encrypted API token), the
-  # zones under each source, and the DNS records under each zone.
+  # instances, each with a unique alias and an encrypted API token) and the
+  # zones under each source. Records are never stored here - add-record/
+  # remove-record/list-records/search all query the live provider API
+  # instead (see Denise::CLI, Denise::Search).
   class Config
     SKELETON_COMMENT = "# DeNiSe CLI configuration - see `denise help add-provider` to get started.\n\n"
+
+    # Default cap on records.log entries (Denise::RecordLog), overridable by
+    # hand-editing `log_max_records` into config.toml.
+    DEFAULT_LOG_MAX_RECORDS = 10_000
 
     attr_reader :path
 
@@ -17,6 +23,7 @@ module Denise
       @crypto = crypto
       @data = load
       encrypt_plaintext_tokens!
+      migrate_legacy_zones!
     end
 
     # -- sources --------------------------------------------------------
@@ -70,6 +77,14 @@ module Denise
       save
     end
 
+    # Max entries kept in records.log before the oldest are shifted out
+    # (Denise::RecordLog). Hand-edit `log_max_records` in config.toml to
+    # override; there's no dedicated command for it, same as manual token
+    # rotation.
+    def log_max_records
+      @data["log_max_records"] || DEFAULT_LOG_MAX_RECORDS
+    end
+
     # Writes a skeleton config.toml if one doesn't exist yet. Returns
     # whether it created one, so callers can tell the user what happened.
     def ensure_file!
@@ -84,6 +99,7 @@ module Denise
     def to_toml_without_secrets
       redacted = {}
       redacted["default_source"] = @data["default_source"] if @data["default_source"]
+      redacted["log_max_records"] = log_max_records
       redacted["sources"] = sources.transform_values { |src| src.except("token_encrypted") }
       Tomlib.dump(redacted)
     end
@@ -91,123 +107,57 @@ module Denise
     # -- zones ------------------------------------------------------------
 
     def add_zone(zone_name, provider_alias:)
-      src = source(provider_alias)
-      zones = (src["zones"] ||= [])
-      raise ZoneConflictError, zone_name if zones.any? { |z| z["name"] == zone_name }
+      zones = (source(provider_alias)["zones"] ||= [])
+      raise ZoneConflictError, zone_name if zones.include?(zone_name)
 
-      zones << { "name" => zone_name, "records" => [] }
+      zones << zone_name
       save
     end
 
     def remove_zone(zone_name, provider_alias:)
       zones = source(provider_alias)["zones"] ||= []
-      zone = zones.find { |z| z["name"] == zone_name }
-      raise UnknownZoneError, zone_name unless zone
+      raise UnknownZoneError, zone_name unless zones.include?(zone_name)
 
-      zones.delete(zone)
+      zones.delete(zone_name)
       save
     end
 
     def list_zones(provider_alias: nil)
       aliases = provider_alias ? [provider_alias] : sources.keys
-      aliases.flat_map do |a|
-        (source(a)["zones"] || []).map { |z| { alias: a, name: z["name"] } }
-      end
+      aliases.flat_map { |a| (source(a)["zones"] || []).map { |z| { alias: a, name: z } } }
+    end
+
+    # Whether this source has the given zone tracked locally - add-record/
+    # remove-record/list-records check this before querying the live API, so
+    # a typoed -z fails fast with UnknownZoneError instead of hitting the
+    # provider blind.
+    def zone?(zone_name, provider_alias:)
+      (source(provider_alias)["zones"] || []).include?(zone_name)
     end
 
     # Aliases of every source that has a zone with this name.
     def sources_for_zone(zone_name)
-      sources.select { |_a, src| (src["zones"] || []).any? { |z| z["name"] == zone_name } }.keys
+      sources.select { |_a, src| (src["zones"] || []).include?(zone_name) }.keys
     end
 
     # Reconciles a source's zones against a live list of zone names from its
-    # provider: adds zones that are new (with an empty records list) and
-    # drops zones that no longer exist there (along with their locally
-    # tracked records). Zones present in both are left untouched, so their
-    # records survive. Returns the added/removed zone names for reporting.
+    # provider: adds zones that are new and drops zones that no longer exist
+    # there. Zones present in both are left untouched. Returns the
+    # added/removed zone names for reporting.
     def sync_zones(provider_alias, zone_names)
       zones = (source(provider_alias)["zones"] ||= [])
-      existing_names = zones.map { |z| z["name"] }
 
-      added = zone_names - existing_names
-      removed = existing_names - zone_names
+      added = zone_names - zones
+      removed = zones - zone_names
 
-      zones.reject! { |z| removed.include?(z["name"]) }
-      added.each { |name| zones << { "name" => name, "records" => [] } }
+      zones.reject! { |z| removed.include?(z) }
+      zones.concat(added)
 
       save
       { added: added, removed: removed }
     end
 
-    # -- records ----------------------------------------------------------
-
-    def add_record(zone_name, provider_alias:, name:, type:, value:, ttl: nil)
-      zone = find_zone(provider_alias, zone_name)
-      record = { "name" => name, "type" => type, "value" => value }
-      record["ttl"] = ttl if ttl
-      (zone["records"] ||= []) << record
-      save
-    end
-
-    def remove_record(zone_name, provider_alias:, name:, type:)
-      records = find_zone(provider_alias, zone_name)["records"] ||= []
-      record = records.find { |r| r["name"] == name && r["type"] == type }
-      raise UnknownRecordError, name unless record
-
-      records.delete(record)
-      save
-    end
-
-    def list_records(zone_name, provider_alias:)
-      find_zone(provider_alias, zone_name)["records"] || []
-    end
-
-    # -- search -------------------------------------------------------------
-
-    SEARCH_CATEGORIES = %w[zones names values].freeze
-
-    # Case-insensitive substring search over one source's zone names, record
-    # names, and record values. Returns an array of hit hashes: a zone hit is
-    # `{ zone:, match: "zone" }`; a record hit is `{ zone:, match:, name:,
-    # type:, value:, ttl: }` where match is "name", "value", or "name,value"
-    # depending on which field(s) matched.
-    def search(query, provider_alias:, categories: SEARCH_CATEGORIES)
-      needle = query.downcase
-      (source(provider_alias)["zones"] || []).flat_map { |zone| search_zone(zone, needle, categories) }
-    end
-
     private
-
-    def search_zone(zone, needle, categories)
-      hits = []
-      if categories.include?("zones") && zone["name"].downcase.include?(needle)
-        hits << { zone: zone["name"],
-                  match: "zone" }
-      end
-
-      (zone["records"] || []).each do |record|
-        matched = record_match(record, needle, categories)
-        next if matched.empty?
-
-        hits << { zone: zone["name"], match: matched.join(","), name: record["name"], type: record["type"],
-                  value: record["value"], ttl: record["ttl"] }
-      end
-      hits
-    end
-
-    def record_match(record, needle, categories)
-      matched = []
-      matched << "name" if categories.include?("names") && record["name"].downcase.include?(needle)
-      matched << "value" if categories.include?("values") && record["value"].downcase.include?(needle)
-      matched
-    end
-
-    def find_zone(provider_alias, zone_name)
-      zone = (source(provider_alias)["zones"] || []).find { |z| z["name"] == zone_name }
-      raise UnknownZoneError, zone_name unless zone
-
-      zone
-    end
 
     # Explicit aliases must not collide with an existing one.
     def claim_alias(alias_name)
@@ -238,6 +188,24 @@ module Denise
         next unless src.key?("token")
 
         src["token_encrypted"] = @crypto.encrypt(src.delete("token"))
+        migrated = true
+      end
+      save if migrated
+    end
+
+    # Older denise versions stored each zone as a {"name" => ..., "records"
+    # => [...]} table (records used to live in config.toml - see the class
+    # comment). Flatten any such entries down to bare zone-name strings on
+    # load, dropping the now-unused records, so upgrading doesn't require a
+    # manual config.toml edit - and rewrite immediately so this only ever
+    # runs once per source.
+    def migrate_legacy_zones!
+      migrated = false
+      sources.each_value do |src|
+        zones = src["zones"]
+        next unless zones&.any?(Hash)
+
+        src["zones"] = zones.map { |z| z.is_a?(Hash) ? z["name"] : z }
         migrated = true
       end
       save if migrated

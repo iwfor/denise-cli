@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "json"
+
 RSpec.describe Denise::CLI do
   before do
     config = Denise::Config.new
@@ -8,19 +10,16 @@ RSpec.describe Denise::CLI do
   end
 
   describe "add-record" do
-    it "creates the record through the provider, then persists it locally" do
+    it "creates the record through the provider" do
       client = instance_double(Denise::Providers::Dreamhost)
       allow(Denise::Providers).to receive(:client_for).with("dreamhost", token: "t1").and_return(client)
       expect(client).to receive(:create_record)
         .with(zone: "example.com", name: "www", type: "A", value: "1.2.3.4", ttl: nil)
 
       silence_output { described_class.start(%w[add-record www --type A --value 1.2.3.4 -z example.com]) }
-
-      records = Denise::Config.new.list_records("example.com", provider_alias: "dh")
-      expect(records).to eq([{ "name" => "www", "type" => "A", "value" => "1.2.3.4" }])
     end
 
-    it "does not persist the record locally when the provider call fails" do
+    it "exits with an error when the provider call fails" do
       client = instance_double(Denise::Providers::Dreamhost)
       allow(Denise::Providers).to receive(:client_for).and_return(client)
       allow(client).to receive(:create_record).and_raise(Denise::ProviderError, "boom")
@@ -28,9 +27,6 @@ RSpec.describe Denise::CLI do
       expect do
         silence_output { described_class.start(%w[add-record www --type A --value 1.2.3.4 -z example.com]) }
       end.to raise_error(SystemExit)
-
-      records = Denise::Config.new.list_records("example.com", provider_alias: "dh")
-      expect(records).to eq([])
     end
 
     it "infers type A from an IPv4 --value when --type is omitted" do
@@ -40,9 +36,6 @@ RSpec.describe Denise::CLI do
         .with(zone: "example.com", name: "www", type: "A", value: "1.2.3.4", ttl: nil)
 
       silence_output { described_class.start(%w[add-record www --value 1.2.3.4 -z example.com]) }
-
-      records = Denise::Config.new.list_records("example.com", provider_alias: "dh")
-      expect(records).to eq([{ "name" => "www", "type" => "A", "value" => "1.2.3.4" }])
     end
 
     it "infers type AAAA from an IPv6 --value when --type is omitted" do
@@ -52,9 +45,6 @@ RSpec.describe Denise::CLI do
         .with(zone: "example.com", name: "www", type: "AAAA", value: "2001:db8::1", ttl: nil)
 
       silence_output { described_class.start(%w[add-record www --value 2001:db8::1 -z example.com]) }
-
-      records = Denise::Config.new.list_records("example.com", provider_alias: "dh")
-      expect(records).to eq([{ "name" => "www", "type" => "AAAA", "value" => "2001:db8::1" }])
     end
 
     it "exits with an error when --type is omitted and --value isn't an IP address" do
@@ -63,70 +53,185 @@ RSpec.describe Denise::CLI do
       expect do
         silence_output { described_class.start(%w[add-record www --value target.example.com -z example.com]) }
       end.to raise_error(SystemExit)
+    end
 
-      records = Denise::Config.new.list_records("example.com", provider_alias: "dh")
-      expect(records).to eq([])
+    it "exits with an error when the zone isn't tracked locally under the resolved provider" do
+      expect(Denise::Providers).not_to receive(:client_for)
+
+      expect do
+        silence_output { described_class.start(%w[add-record www --value 1.2.3.4 -z untracked.com]) }
+      end.to raise_error(SystemExit)
+    end
+
+    it "logs the change to records.log after the record is created" do
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).with("dreamhost", token: "t1").and_return(client)
+      allow(client).to receive(:create_record)
+
+      silence_output { described_class.start(%w[add-record www --type A --value 1.2.3.4 -z example.com]) }
+
+      entry = JSON.parse(File.readlines(Denise::Paths.records_log_file, chomp: true).last)
+      expect(entry).to include(
+        "provider" => "dreamhost", "alias" => "dh", "action" => "add", "zone" => "example.com",
+        "name" => "www", "type" => "A", "value" => "1.2.3.4"
+      )
+    end
+
+    it "does not log to records.log when the provider call fails" do
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).and_return(client)
+      allow(client).to receive(:create_record).and_raise(Denise::ProviderError, "boom")
+
+      expect do
+        silence_output { described_class.start(%w[add-record www --type A --value 1.2.3.4 -z example.com]) }
+      end.to raise_error(SystemExit)
+
+      expect(File.exist?(Denise::Paths.records_log_file)).to be(false)
+    end
+  end
+
+  describe "list-records" do
+    it "lists records from a live query to the provider" do
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).with("dreamhost", token: "t1").and_return(client)
+      allow(client).to receive(:list_records).with(zone: "example.com")
+                                             .and_return([{ "name" => "www", "type" => "A", "value" => "1.2.3.4",
+                                                            "ttl" => 300 }])
+
+      output = capture_stdout { described_class.start(%w[list-records -z example.com]) }
+
+      expect(output).to include("www")
+      expect(output).to include("1.2.3.4")
+    end
+
+    it "reports when there are no records" do
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).and_return(client)
+      allow(client).to receive(:list_records).and_return([])
+
+      output = capture_stdout { described_class.start(%w[list-records -z example.com]) }
+
+      expect(output).to include("No records found for 'example.com'")
+    end
+
+    it "exits with an error when the zone isn't tracked locally" do
+      expect(Denise::Providers).not_to receive(:client_for)
+
+      expect do
+        silence_output { described_class.start(%w[list-records -z untracked.com]) }
+      end.to raise_error(SystemExit)
     end
   end
 
   describe "remove-record" do
-    before do
-      Denise::Config.new.add_record("example.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
-    end
-
-    it "deletes the record through the provider, then removes it locally" do
+    it "deletes the record through the provider" do
       client = instance_double(Denise::Providers::Dreamhost)
       allow(Denise::Providers).to receive(:client_for).with("dreamhost", token: "t1").and_return(client)
+      allow(client).to receive(:list_records).with(zone: "example.com")
+                                             .and_return([{ "name" => "www", "type" => "A", "value" => "1.2.3.4",
+                                                            "ttl" => nil }])
       expect(client).to receive(:delete_record).with(zone: "example.com", name: "www", type: "A")
 
       silence_output { described_class.start(%w[remove-record www --type A -z example.com]) }
-
-      records = Denise::Config.new.list_records("example.com", provider_alias: "dh")
-      expect(records).to eq([])
     end
 
-    it "keeps the local record when the provider call fails" do
+    it "exits with an error when the provider's delete call fails" do
       client = instance_double(Denise::Providers::Dreamhost)
       allow(Denise::Providers).to receive(:client_for).and_return(client)
+      allow(client).to receive(:list_records)
+        .and_return([{ "name" => "www", "type" => "A", "value" => "1.2.3.4", "ttl" => nil }])
+      allow(client).to receive(:delete_record).and_raise(Denise::ProviderError, "boom")
+
+      expect do
+        silence_output { described_class.start(%w[remove-record www --type A -z example.com]) }
+      end.to raise_error(SystemExit)
+    end
+
+    it "infers the type from the live listing when the name is unambiguous" do
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).with("dreamhost", token: "t1").and_return(client)
+      allow(client).to receive(:list_records)
+        .and_return([{ "name" => "www", "type" => "A", "value" => "1.2.3.4", "ttl" => nil }])
+      expect(client).to receive(:delete_record).with(zone: "example.com", name: "www", type: "A")
+
+      silence_output { described_class.start(%w[remove-record www -z example.com]) }
+    end
+
+    it "exits with an error and requires --type when the name matches records of multiple types" do
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).and_return(client)
+      allow(client).to receive(:list_records).and_return(
+        [
+          { "name" => "www", "type" => "A", "value" => "1.2.3.4", "ttl" => nil },
+          { "name" => "www", "type" => "AAAA", "value" => "::1", "ttl" => nil }
+        ]
+      )
+      expect(client).not_to receive(:delete_record)
+
+      expect do
+        silence_output { described_class.start(%w[remove-record www -z example.com]) }
+      end.to raise_error(SystemExit)
+    end
+
+    it "exits with an error when --type is omitted and no record matches the name" do
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).and_return(client)
+      allow(client).to receive(:list_records).and_return([])
+      expect(client).not_to receive(:delete_record)
+
+      expect do
+        silence_output { described_class.start(%w[remove-record missing -z example.com]) }
+      end.to raise_error(SystemExit)
+    end
+
+    it "exits with an error when an explicit --type doesn't match any live record" do
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).and_return(client)
+      allow(client).to receive(:list_records)
+        .and_return([{ "name" => "www", "type" => "A", "value" => "1.2.3.4", "ttl" => nil }])
+      expect(client).not_to receive(:delete_record)
+
+      expect do
+        silence_output { described_class.start(%w[remove-record www --type AAAA -z example.com]) }
+      end.to raise_error(SystemExit)
+    end
+
+    it "exits with an error when the zone isn't tracked locally" do
+      expect(Denise::Providers).not_to receive(:client_for)
+
+      expect do
+        silence_output { described_class.start(%w[remove-record www --type A -z untracked.com]) }
+      end.to raise_error(SystemExit)
+    end
+
+    it "logs the change to records.log after the record is removed" do
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).with("dreamhost", token: "t1").and_return(client)
+      allow(client).to receive(:list_records)
+        .and_return([{ "name" => "www", "type" => "A", "value" => "1.2.3.4", "ttl" => nil }])
+      allow(client).to receive(:delete_record)
+
+      silence_output { described_class.start(%w[remove-record www --type A -z example.com]) }
+
+      entry = JSON.parse(File.readlines(Denise::Paths.records_log_file, chomp: true).last)
+      expect(entry).to include(
+        "provider" => "dreamhost", "alias" => "dh", "action" => "remove", "zone" => "example.com",
+        "name" => "www", "type" => "A", "value" => "1.2.3.4"
+      )
+    end
+
+    it "does not log to records.log when the provider's delete call fails" do
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).and_return(client)
+      allow(client).to receive(:list_records)
+        .and_return([{ "name" => "www", "type" => "A", "value" => "1.2.3.4", "ttl" => nil }])
       allow(client).to receive(:delete_record).and_raise(Denise::ProviderError, "boom")
 
       expect do
         silence_output { described_class.start(%w[remove-record www --type A -z example.com]) }
       end.to raise_error(SystemExit)
 
-      records = Denise::Config.new.list_records("example.com", provider_alias: "dh")
-      expect(records).to eq([{ "name" => "www", "type" => "A", "value" => "1.2.3.4" }])
-    end
-
-    it "infers the type from the local record when the name is unambiguous" do
-      client = instance_double(Denise::Providers::Dreamhost)
-      allow(Denise::Providers).to receive(:client_for).with("dreamhost", token: "t1").and_return(client)
-      expect(client).to receive(:delete_record).with(zone: "example.com", name: "www", type: "A")
-
-      silence_output { described_class.start(%w[remove-record www -z example.com]) }
-
-      records = Denise::Config.new.list_records("example.com", provider_alias: "dh")
-      expect(records).to eq([])
-    end
-
-    it "exits with an error and requires --type when the name matches records of multiple types" do
-      Denise::Config.new.add_record("example.com", provider_alias: "dh", name: "www", type: "AAAA", value: "::1")
-      expect(Denise::Providers).not_to receive(:client_for)
-
-      expect do
-        silence_output { described_class.start(%w[remove-record www -z example.com]) }
-      end.to raise_error(SystemExit)
-
-      records = Denise::Config.new.list_records("example.com", provider_alias: "dh")
-      expect(records.size).to eq(2)
-    end
-
-    it "exits with an error when --type is omitted and no record matches the name" do
-      expect(Denise::Providers).not_to receive(:client_for)
-
-      expect do
-        silence_output { described_class.start(%w[remove-record missing -z example.com]) }
-      end.to raise_error(SystemExit)
+      expect(File.exist?(Denise::Paths.records_log_file)).to be(false)
     end
   end
 
@@ -206,11 +311,13 @@ RSpec.describe Denise::CLI do
   end
 
   describe "search" do
-    before do
-      Denise::Config.new.add_record("example.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
-    end
-
     it "finds matches under the default provider when -p is omitted" do
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).with("dreamhost", token: "t1").and_return(client)
+      allow(client).to receive(:list_records).with(zone: "example.com")
+                                             .and_return([{ "name" => "www", "type" => "A", "value" => "1.2.3.4",
+                                                            "ttl" => nil }])
+
       output = capture_stdout { described_class.start(%w[search www]) }
 
       expect(output).to include("dh")
@@ -219,6 +326,10 @@ RSpec.describe Denise::CLI do
     end
 
     it "reports no matches for a query that doesn't hit anything" do
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).and_return(client)
+      allow(client).to receive(:list_records).and_return([])
+
       output = capture_stdout { described_class.start(%w[search nonesuch]) }
 
       expect(output).to include("No matches for 'nonesuch'")
@@ -227,16 +338,45 @@ RSpec.describe Denise::CLI do
     it "searches every provider with the virtual alias -p all" do
       Denise::Config.new.add_source(provider: "cloudflare", token: "cftok", alias_name: "cf")
       Denise::Config.new.add_zone("other.com", provider_alias: "cf")
-      Denise::Config.new.add_record("other.com", provider_alias: "cf", name: "app", type: "A", value: "5.6.7.8")
 
-      output = capture_stdout { described_class.start(%w[search . -p all]) }
+      dh_client = instance_double(Denise::Providers::Dreamhost)
+      cf_client = instance_double(Denise::Providers::Cloudflare)
+      allow(Denise::Providers).to receive(:client_for).with("dreamhost", token: "t1").and_return(dh_client)
+      allow(Denise::Providers).to receive(:client_for).with("cloudflare", token: "cftok").and_return(cf_client)
+      allow(dh_client).to receive(:list_records).and_return([])
+      allow(cf_client).to receive(:list_records).with(zone: "other.com")
+                                                .and_return([{ "name" => "app", "type" => "A", "value" => "5.6.7.8",
+                                                               "ttl" => nil }])
 
-      expect(output).to include("dh")
+      output = capture_stdout { described_class.start(%w[search app -p all]) }
+
       expect(output).to include("cf")
       expect(output).to include("other.com")
     end
 
+    it "continues past a per-zone failure and still returns matches from other zones" do
+      Denise::Config.new.add_zone("second.com", provider_alias: "dh")
+
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).with("dreamhost", token: "t1").and_return(client)
+      allow(client).to receive(:list_records).with(zone: "example.com").and_raise(Denise::ProviderError, "boom")
+      allow(client).to receive(:list_records).with(zone: "second.com")
+                                             .and_return([{ "name" => "www", "type" => "A", "value" => "1.2.3.4",
+                                                            "ttl" => nil }])
+
+      stdout = nil
+      stderr = capture_stderr { stdout = capture_stdout { described_class.start(%w[search www]) } }
+
+      expect(stdout).to include("second.com")
+      expect(stderr).to include("boom")
+    end
+
     it "restricts matches to the categories given in --limit" do
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).and_return(client)
+      allow(client).to receive(:list_records)
+        .and_return([{ "name" => "www", "type" => "A", "value" => "1.2.3.4", "ttl" => nil }])
+
       output = capture_stdout { described_class.start(%w[search 1.2.3.4 --limit zones,names]) }
 
       expect(output).to include("No matches for '1.2.3.4'")
@@ -285,7 +425,7 @@ RSpec.describe Denise::CLI do
       expect(output).not_to include("No config file found")
       expect(output).not_to include("token_encrypted")
       expect(output).to include('provider = "dreamhost"')
-      expect(output).to include('name = "example.com"')
+      expect(output).to include('zones = [ "example.com" ]')
     end
   end
 

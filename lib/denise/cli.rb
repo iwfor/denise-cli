@@ -31,6 +31,7 @@ module Denise
       super
       Denise.verbose = options[:verbose]
       @config = Config.new
+      @record_log = RecordLog.new(config: @config)
     end
 
     desc "help [COMMAND]", "Describe available commands or one specific command"
@@ -195,20 +196,23 @@ module Denise
       alias_name = resolve_provider_alias(zone: zone)
 
       provider_client(alias_name).create_record(zone: zone, name: name, type: type, value: value, ttl: ttl)
-      @config.add_record(zone, provider_alias: alias_name, name: name, type: type, value: value, ttl: ttl)
+      @record_log.add(alias_name: alias_name, action: "add", zone: zone,
+                      record: { "name" => name, "type" => type, "value" => value, "ttl" => ttl })
       say "Added #{type} record '#{name}' to zone '#{zone}' (#{alias_name})."
     rescue Error => e
       error_exit(e)
     end
 
-    desc "list-records", "List DNS records denise has added to a zone (from local config, not a live query)"
+    desc "list-records", "List DNS records in a zone (queries the provider live)"
     method_option :zone, aliases: "-z", required: true, desc: "Zone to list records for"
     def list_records
-      alias_name = resolve_provider_alias(zone: options[:zone])
-      rows = @config.list_records(options[:zone], provider_alias: alias_name)
-                    .map { |r| [r["name"], r["type"], r["value"], r["ttl"]] }
+      zone = options[:zone]
+      alias_name = resolve_provider_alias(zone: zone)
+
+      records = provider_client(alias_name).list_records(zone: zone)
+      rows = records.map { |r| [r["name"], r["type"], r["value"], r["ttl"]] }
       if rows.empty?
-        say "No records configured for '#{options[:zone]}'."
+        say "No records found for '#{zone}'."
         return
       end
       print_table([%w[NAME TYPE VALUE TTL], *rows])
@@ -222,20 +226,21 @@ module Denise
     def remove_record(name)
       zone = options[:zone]
       alias_name = resolve_provider_alias(zone: zone)
-      type = options[:type] || RecordTypes.resolve(@config.list_records(zone, provider_alias: alias_name), name)
+      client = provider_client(alias_name)
+      record = RecordTypes.find(client.list_records(zone: zone), name, options[:type])
 
-      provider_client(alias_name).delete_record(zone: zone, name: name, type: type)
-      @config.remove_record(zone, provider_alias: alias_name, name: name, type: type)
-      say "Removed #{type} record '#{name}' from zone '#{zone}' (#{alias_name})."
+      client.delete_record(zone: zone, name: name, type: record["type"])
+      @record_log.add(alias_name: alias_name, action: "remove", zone: zone, record: record)
+      say "Removed #{record['type']} record '#{name}' from zone '#{zone}' (#{alias_name})."
     rescue Error => e
       error_exit(e)
     end
 
-    desc "search QUERY", "Search zone names, record names, and record values (case-insensitive, local config only)"
+    desc "search QUERY", "Search zone names, record names, and record values (queries providers live for names/values)"
     method_option :limit, desc: "Comma-separated categories to search: zones,names,values (default: all)"
     def search(query)
       aliases = Search.provider_aliases(@config, options[:provider]) { resolve_provider_alias }
-      rows = Search.rows(@config, query, aliases, Search.categories(options[:limit]))
+      rows = Search.rows(@config, query, aliases, Search.categories(options[:limit])) { |a| provider_client(a) }
       return say "No matches for '#{query}'." if rows.empty?
 
       print_table([%w[PROVIDER ZONE MATCH NAME TYPE VALUE TTL], *rows])
@@ -251,9 +256,16 @@ module Denise
     private
 
     # Provider resolution order: -p/--provider, then inferred from the zone
-    # that owns it (-z/--zone), then the configured default provider.
+    # that owns it (-z/--zone), then the configured default provider. A
+    # given zone must already be tracked under the resolved alias (records
+    # are never stored locally, so there's no other way to catch a typoed
+    # -z before it reaches the live API) - raises UnknownZoneError otherwise.
     def resolve_provider_alias(zone: nil)
-      return options[:provider] if options[:provider]
+      if options[:provider]
+        raise UnknownZoneError, zone if zone && !@config.zone?(zone, provider_alias: options[:provider])
+
+        return options[:provider]
+      end
 
       if zone
         matches = @config.sources_for_zone(zone)
@@ -261,7 +273,7 @@ module Denise
         when 1
           return matches.first
         when 0
-          # no source owns this zone yet; fall through to the default
+          raise UnknownZoneError, zone
         else
           raise AmbiguousZoneError.new(zone, matches)
         end
@@ -276,19 +288,7 @@ module Denise
     end
 
     def sync_zones_for(alias_name)
-      zone_names = provider_client(alias_name).list_zones
-      result = @config.sync_zones(alias_name, zone_names)
-      report_zone_sync(alias_name, result)
-    end
-
-    def report_zone_sync(alias_name, result)
-      added, removed = result.values_at(:added, :removed)
-      if added.empty? && removed.empty?
-        say "#{alias_name}: zones up to date."
-        return
-      end
-      say "#{alias_name}: added #{added.join(', ')}." if added.any?
-      say "#{alias_name}: removed #{removed.join(', ')}." if removed.any?
+      ZoneSync.call(@config, alias_name, provider_client(alias_name)).each { |line| say line }
     end
 
     def prompt_token(provider)
