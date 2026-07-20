@@ -29,3 +29,10 @@ ensure
   $stdout = original_stdout
   $stderr = original_stderr
 end
+
+# Writes raw TOML directly to config.toml, bypassing Denise::Config, to
+# simulate a hand-edited config file.
+def write_config(toml)
+  FileUtils.mkdir_p(File.dirname(Denise::Paths.config_file))
+  File.write(Denise::Paths.config_file, toml)
+end

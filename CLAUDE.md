@@ -40,6 +40,13 @@ A per-install encryption key is auto-created at `~/.config/denise-cli/key` with 
 (`Denise::Crypto#ensure_key!`) and used to AES-256-GCM encrypt every provider API token before it's written to
 the TOML file. The key is never rotated automatically — rotating it would orphan already-encrypted tokens.
 
+A source's token is stored as `token_encrypted`. config.toml is meant to be hand-editable, and a person editing
+it by hand has no way to produce ciphertext, so `Denise::Config#encrypt_plaintext_tokens!` runs on every load:
+if a source has a plaintext `token` key, it's encrypted into `token_encrypted` and the plaintext is deleted,
+rewriting the file immediately — so a plaintext token is never left on disk past the next command invocation.
+This also doubles as the manual-rotation path: a freshly hand-edited `token` always overwrites a stale
+`token_encrypted`. `token_for` raises `MissingTokenError` if a source has neither key.
+
 ### Data model
 
 A **source** is one configured instance of a provider: a provider type (`cloudflare`, `dreamhost`, ...), an

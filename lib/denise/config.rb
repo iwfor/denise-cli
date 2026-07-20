@@ -14,6 +14,7 @@ module Denise
       @path = path
       @crypto = crypto
       @data = load
+      encrypt_plaintext_tokens!
     end
 
     # -- sources --------------------------------------------------------
@@ -31,7 +32,10 @@ module Denise
     end
 
     def token_for(alias_name)
-      @crypto.decrypt(source(alias_name).fetch("token"))
+      encrypted = source(alias_name)["token_encrypted"]
+      raise MissingTokenError, alias_name unless encrypted
+
+      @crypto.decrypt(encrypted)
     end
 
     def add_source(provider:, token:, alias_name: nil, default: false)
@@ -41,7 +45,7 @@ module Denise
 
       sources[resolved_alias] = {
         "provider" => provider,
-        "token" => @crypto.encrypt(token),
+        "token_encrypted" => @crypto.encrypt(token),
         "zones" => []
       }
       @data["default_source"] = resolved_alias if default || @data["default_source"].nil?
@@ -144,6 +148,22 @@ module Denise
       n = 2
       n += 1 while sources.key?("#{base}#{n}")
       "#{base}#{n}"
+    end
+
+    # A hand-edited config.toml may set a plaintext `token` (the user has no
+    # way to produce the encrypted form themselves). Encrypt it into
+    # `token_encrypted` and drop the plaintext, so it's never written back
+    # to disk unencrypted. Also covers manual token rotation: a freshly
+    # hand-edited `token` always wins over a stale `token_encrypted`.
+    def encrypt_plaintext_tokens!
+      migrated = false
+      sources.each_value do |src|
+        next unless src.key?("token")
+
+        src["token_encrypted"] = @crypto.encrypt(src.delete("token"))
+        migrated = true
+      end
+      save if migrated
     end
 
     def load

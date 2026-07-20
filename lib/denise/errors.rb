@@ -51,6 +51,12 @@ module Denise
     end
   end
 
+  class MissingTokenError < Error
+    def initialize(alias_name)
+      super("source '#{alias_name}' has no token; add `token = \"...\"` under [sources.#{alias_name}] in config.toml")
+    end
+  end
+
   # Raised by provider clients (lib/denise/providers/*) for API/network failures.
   class ProviderError < Error; end
 end

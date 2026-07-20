@@ -51,6 +51,46 @@ RSpec.describe Denise::Config do
 
       raw = File.read(Denise::Paths.config_file)
       expect(raw).not_to include("super-secret")
+      expect(raw).to include("token_encrypted")
+    end
+  end
+
+  describe "plaintext token migration" do
+    it "encrypts a hand-written token on load and rewrites it as token_encrypted" do
+      write_config(<<~TOML)
+        [sources.dh]
+        provider = "dreamhost"
+        token = "hand-typed-secret"
+      TOML
+
+      migrated = described_class.new
+
+      expect(migrated.token_for("dh")).to eq("hand-typed-secret")
+
+      raw = File.read(Denise::Paths.config_file)
+      expect(raw).not_to include("hand-typed-secret")
+      expect(raw).to include("token_encrypted")
+      expect(raw).not_to match(/^\s*token\s*=/)
+    end
+
+    it "prefers a freshly hand-edited token over a stale token_encrypted (manual rotation)" do
+      config.add_source(provider: "dreamhost", token: "old-secret", alias_name: "dh")
+      File.write(Denise::Paths.config_file, "#{File.read(Denise::Paths.config_file)}\ntoken = \"new-secret\"\n")
+
+      rotated = described_class.new
+
+      expect(rotated.token_for("dh")).to eq("new-secret")
+    end
+
+    it "raises MissingTokenError when a source has neither token nor token_encrypted" do
+      write_config(<<~TOML)
+        [sources.dh]
+        provider = "dreamhost"
+      TOML
+
+      broken = described_class.new
+
+      expect { broken.token_for("dh") }.to raise_error(Denise::MissingTokenError, /dh/)
     end
   end
 
