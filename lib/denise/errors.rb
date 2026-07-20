@@ -50,4 +50,7 @@ module Denise
       super("no provider specified and no default provider is set")
     end
   end
+
+  # Raised by provider clients (lib/denise/providers/*) for API/network failures.
+  class ProviderError < Error; end
 end

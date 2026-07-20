@@ -107,21 +107,17 @@ module Denise
     method_option :value, required: true, desc: "Record value"
     method_option :ttl, type: :numeric, desc: "Time to live in seconds"
     def add_entry(name)
-      alias_name = resolve_provider_alias(zone: options[:zone])
-      @config.add_entry(
-        options[:zone],
-        provider_alias: alias_name,
-        name: name,
-        type: options[:type],
-        value: options[:value],
-        ttl: options[:ttl]
-      )
-      say "Added #{options[:type]} entry '#{name}' to zone '#{options[:zone]}' (#{alias_name})."
+      zone, type, value, ttl = options.values_at("zone", "type", "value", "ttl")
+      alias_name = resolve_provider_alias(zone: zone)
+
+      provider_client(alias_name).create_record(zone: zone, name: name, type: type, value: value, ttl: ttl)
+      @config.add_entry(zone, provider_alias: alias_name, name: name, type: type, value: value, ttl: ttl)
+      say "Added #{type} entry '#{name}' to zone '#{zone}' (#{alias_name})."
     rescue Error => e
       error_exit(e)
     end
 
-    desc "list-entries", "List DNS entries in a zone"
+    desc "list-entries", "List DNS entries denise has added to a zone (from local config, not a live query)"
     method_option :zone, aliases: "-z", required: true, desc: "Zone to list entries for"
     def list_entries
       alias_name = resolve_provider_alias(zone: options[:zone])
@@ -140,9 +136,12 @@ module Denise
     method_option :zone, aliases: "-z", required: true, desc: "Zone the entry belongs to"
     method_option :type, required: true, desc: "Record type of the entry to remove"
     def remove_entry(name)
-      alias_name = resolve_provider_alias(zone: options[:zone])
-      @config.remove_entry(options[:zone], provider_alias: alias_name, name: name, type: options[:type])
-      say "Removed #{options[:type]} entry '#{name}' from zone '#{options[:zone]}' (#{alias_name})."
+      zone, type = options.values_at("zone", "type")
+      alias_name = resolve_provider_alias(zone: zone)
+
+      provider_client(alias_name).delete_record(zone: zone, name: name, type: type)
+      @config.remove_entry(zone, provider_alias: alias_name, name: name, type: type)
+      say "Removed #{type} entry '#{name}' from zone '#{zone}' (#{alias_name})."
     rescue Error => e
       error_exit(e)
     end
@@ -172,6 +171,11 @@ module Denise
       end
 
       @config.default_source_alias || raise(NoProviderError)
+    end
+
+    def provider_client(alias_name)
+      src = @config.source(alias_name)
+      Providers.client_for(src["provider"], token: @config.token_for(alias_name))
     end
 
     def prompt_token

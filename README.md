@@ -9,6 +9,16 @@ Providers
 - Cloudflare
 - DreamHost
 
+TODO
+----
+
+Planned providers:
+
+- [ ] AWS Route 53
+- [ ] GCP Cloud DNS
+- [ ] HostGator
+- [ ] Azure DNS
+
 Configuration
 -------------
 

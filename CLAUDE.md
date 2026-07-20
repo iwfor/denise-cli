@@ -14,7 +14,10 @@ A thrown together simple DNS manager for hobbyists, written in Ruby.
 - `lib/denise/cli.rb` — Thor-based command definitions
 - `lib/denise/config.rb` — reads/writes `config.toml`; source/zone/entry CRUD, alias resolution
 - `lib/denise/crypto.rb` — key management + AES-256-GCM encrypt/decrypt for tokens
-- `lib/denise/providers.rb` — registry of known providers and their default aliases
+- `lib/denise/providers.rb` — registry of known providers, their default aliases, and `client_for` factory
+- `lib/denise/providers/base.rb` — shared provider client interface (`create_record`/`delete_record`/`list_records`)
+- `lib/denise/providers/cloudflare.rb` — Cloudflare v4 API client (Bearer token, zone-id lookup/cache)
+- `lib/denise/providers/dreamhost.rb` — DreamHost API client (key-based query auth, no zone/TTL params)
 - `lib/denise/paths.rb` — config directory/file path resolution (`DENISE_CONFIG_DIR` override for tests)
 - `lib/denise/completions.rb` — bash/zsh completion script generation
 - `lib/denise/errors.rb` — typed error classes, each rescued in the CLI and printed as `denise: <message>`
@@ -25,7 +28,7 @@ A thrown together simple DNS manager for hobbyists, written in Ruby.
 
 - Ruby, managed with Bundler (`Gemfile`)
 - `thor` for the CLI
-- `faraday` for provider HTTP APIs (not yet wired up — see Roadmap)
+- `faraday` for provider HTTP APIs (Cloudflare, DreamHost)
 - `tomlib` for TOML config read/write
 - `rspec` for tests, `rubocop` for linting, `bundler-audit` for dependency vulnerability scanning
 - `base64` and `reline` are pulled in explicitly since they stopped being Ruby default gems as of 3.4/4.0
@@ -50,8 +53,28 @@ aliases differ.
 - The default *source* is whichever alias was added first, unless overridden with `--default` on `add-provider`
   or later via `set-default-provider`.
 
-Zones live under their source; entries (DNS records: name/type/value/ttl) live under their zone. Entries are
-config-only for now — no live provider API calls are made yet (see Roadmap).
+Zones live under their source; entries (DNS records: name/type/value/ttl) live under their zone.
+
+### Provider clients
+
+`add-entry`/`remove-entry` call the live provider (`Denise::Providers.client_for(provider_type, token:)`) and
+only touch local config *after* the API call succeeds — a failed API call leaves local config untouched, so it
+never drifts from what's actually live. `list-entries` is the one exception: it reads local config only (no
+network call), so it shows what denise has provisioned, not necessarily everything that exists in the zone
+(records created outside denise won't show up).
+
+Every provider client subclasses `Denise::Providers::Base` and implements `create_record`/`delete_record`/
+`list_records`, raising `Denise::ProviderError` on any API/network failure. `initialize(token:, connection:
+nil)` accepts an injectable Faraday connection so specs can stub HTTP via `Faraday::Adapter::Test::Stubs`
+without touching the network — see `spec/denise/providers/*_spec.rb`.
+
+**Gotcha that already bit us once:** stubbed specs can be self-consistently wrong about the base URL if the
+bug is in how the base URL and request path are joined, because the same (buggy) construction is used on both
+sides. `Cloudflare::API_URL` must end in a trailing slash and request paths must NOT start with `/` — Faraday
+resolves `req.url("/foo", ...)` against the connection's base URL like a browser resolves an absolute-path
+link, which discards the base path (`/client/v4`) entirely. Whenever adding a new provider client, do at least
+one live request against the real endpoint with a garbage token (an auth-format error, not a 404, confirms the
+URL is right) in addition to the stubbed specs.
 
 ### Provider resolution (`-p`/`--provider`)
 
@@ -86,8 +109,8 @@ dispatch, so `denise add-provider` and the `desc` help text both show the hyphen
   - `bundle exec rubocop`
   - `bundle exec bundler-audit check --update`
 - `Style/StringLiterals` is configured for double-quoted strings project-wide.
-- New provider integrations belong under `lib/denise/providers/` behind a shared interface (not yet created —
-  only the alias registry exists so far).
+- New provider integrations belong under `lib/denise/providers/` as a `Denise::Providers::Base` subclass, then
+  registered in `Denise::Providers::KNOWN` and `Denise::Providers.client_for`.
 - **7-day age gate on new Gemfile dependencies.** Before adding any gem, check its release date on
   rubygems.org (`https://rubygems.org/api/v1/versions/<gem>.json`) and pin the Gemfile to the newest version
   that is at least 7 days old as of the current date (exact pin, e.g. `gem "rubocop", "1.88.2"`, not `~>`).
@@ -96,6 +119,6 @@ dispatch, so `denise add-provider` and the `desc` help text both show the hyphen
 
 ## Roadmap / explicitly deferred
 
-- Live Cloudflare/DreamHost API calls for `add/list/remove-entry` (currently local-config-only, by design —
-  confirmed with the user rather than assumed).
-- A real provider client abstraction once API calls are wired up.
+- Additional providers (see README TODO): AWS Route 53, GCP Cloud DNS, HostGator, Azure DNS.
+- `list-entries` is local-config-only; there's no live/refresh flag to reconcile against what the provider
+  actually has.

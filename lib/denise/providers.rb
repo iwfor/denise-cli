@@ -20,5 +20,14 @@ module Denise
     def default_alias(name)
       KNOWN.fetch(name).fetch(:default_alias)
     end
+
+    def client_for(name, token:)
+      raise UnknownProviderError, name unless known?(name)
+
+      case name
+      when "cloudflare" then Cloudflare.new(token: token)
+      when "dreamhost" then Dreamhost.new(token: token)
+      end
+    end
   end
 end
