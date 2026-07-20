@@ -13,7 +13,7 @@ A thrown together simple DNS manager for hobbyists, written in Ruby.
 - `bin/denise` — CLI entry point; intercepts `--completions` before handing off to Thor
 - `lib/denise.rb` — top-level requires
 - `lib/denise/cli.rb` — Thor-based command definitions
-- `lib/denise/config.rb` — reads/writes `config.toml`; source/zone/entry CRUD, alias resolution
+- `lib/denise/config.rb` — reads/writes `config.toml`; source/zone/record CRUD, alias resolution
 - `lib/denise/crypto.rb` — key management + AES-256-GCM encrypt/decrypt for tokens
 - `lib/denise/providers.rb` — registry of known providers, their default aliases, and `client_for` factory
 - `lib/denise/providers/base.rb` — shared provider client interface
@@ -69,7 +69,7 @@ aliases differ.
 - The default *source* is whichever alias was added first, unless overridden with `--default` on `add-provider`
   or later via `set-default-provider`.
 
-Zones live under their source; entries (DNS records: name/type/value/ttl) live under their zone.
+Zones live under their source; records (name/type/value/ttl) live under their zone.
 
 ### Zone import / refresh
 
@@ -81,9 +81,9 @@ source itself.
 
 `refresh-zones` re-runs the same sync: `-p ALIAS` for one source, or every configured source if `-p` is
 omitted. `Config#sync_zones(alias, live_zone_names)` diffs against the locally stored zone list - new zones
-are added with empty entries, zones no longer present are dropped **along with their locally tracked
-entries**, and zones present in both are left untouched (so their entries survive). There's no confirmation
-prompt before removing a zone/its entries, unlike `remove-provider` - this command's whole point is
+are added with empty records, zones no longer present are dropped **along with their locally tracked
+records**, and zones present in both are left untouched (so their records survive). There's no confirmation
+prompt before removing a zone/its records, unlike `remove-provider` - this command's whole point is
 "make local state match the live API," so a removal here just means the CLI has already caught up to a
 change made at the provider, not a new destructive action of its own.
 
@@ -94,9 +94,9 @@ Style/CombinableLoops` marks this as deliberate, not an oversight).
 
 ### Provider clients
 
-`add-entry`/`remove-entry` call the live provider (`Denise::Providers.client_for(provider_type, token:)`) and
+`add-record`/`remove-record` call the live provider (`Denise::Providers.client_for(provider_type, token:)`) and
 only touch local config *after* the API call succeeds — a failed API call leaves local config untouched, so it
-never drifts from what's actually live. `list-entries` is the one exception: it reads local config only (no
+never drifts from what's actually live. `list-records` is the one exception: it reads local config only (no
 network call), so it shows what denise has provisioned, not necessarily everything that exists in the zone
 (records created outside denise won't show up). Zones, by contrast, are actively synced from the live API by
 `add-provider`/`refresh-zones` (see above) — `list-zones` still just reads local config, but that config is
@@ -155,7 +155,7 @@ just that logging happens - see `capture_stderr` in `spec/spec_helper.rb`.
 
 ### Provider resolution (`-p`/`--provider`)
 
-Used by every zone/entry command via `CLI#resolve_provider_alias`, in this order:
+Used by every zone/record command via `CLI#resolve_provider_alias`, in this order:
 
 1. `-p/--provider ALIAS` if given.
 2. Inferred from `-z/--zone ZONE` if exactly one source owns a zone with that name (`AmbiguousZoneError` if
@@ -170,7 +170,7 @@ explicit positional argument, plus a confirmation prompt (skippable with `-y/--y
 `config`,
 `add-provider` / `list-providers` / `remove-provider` / `set-default-provider`,
 `add-zone` / `list-zones` / `remove-zone` / `refresh-zones`,
-`add-entry` / `list-entries` / `remove-entry`,
+`add-record` / `list-records` / `remove-record`,
 `version`, and `--completions [bash|zsh]` (defaults to `$SHELL`; handled in `bin/denise`, not a Thor command,
 so it works without a subcommand).
 
@@ -187,8 +187,8 @@ aliased to the `help` command) rather than a declared option, so Thor never list
 `denise help COMMAND` (a specific command) skips both additions.
 
 **`denise COMMAND -h`/`--help` works too**, not just `-h`/`--help` as the very first word. Thor's own
-`HELP_MAPPINGS` only checks `argv[0]`, so without help `denise add-entry --help` would be parsed as a regular
-(unrecognized) option for `add-entry` instead of showing its help. `CLI.dispatch` is overridden to catch
+`HELP_MAPPINGS` only checks `argv[0]`, so without help `denise add-record --help` would be parsed as a regular
+(unrecognized) option for `add-record` instead of showing its help. `CLI.dispatch` is overridden to catch
 `-h`/`--help` anywhere in a command's own args *before* Thor's normal dispatch runs, and redirects to
 `help COMMAND` instead — see the method comment for the exact mechanics (it works by reconstructing the args
 Thor's own dispatch expects for invoking `help` with a command name, not by calling the command and then
@@ -227,5 +227,5 @@ picked up automatically the way other flags are).
 ## Roadmap / explicitly deferred
 
 - Additional providers (see README TODO): GCP Cloud DNS, HostGator, Azure DNS.
-- `list-entries` is local-config-only; there's no live/refresh flag to reconcile against what the provider
+- `list-records` is local-config-only; there's no live/refresh flag to reconcile against what the provider
   actually has.

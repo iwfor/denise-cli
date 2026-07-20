@@ -86,5 +86,5 @@ fpath=(~/.zsh/completions $fpath)
 autoload -Uz compinit && compinit
 ```
 
-Either way, `denise <TAB>` should suggest commands, and `denise add-entry
+Either way, `denise <TAB>` should suggest commands, and `denise add-record
 <TAB>` should suggest that command's flags.

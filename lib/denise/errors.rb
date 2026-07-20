@@ -33,9 +33,9 @@ module Denise
     end
   end
 
-  class UnknownEntryError < Error
+  class UnknownRecordError < Error
     def initialize(name)
-      super("no entry named '#{name}'")
+      super("no record named '#{name}'")
     end
   end
 

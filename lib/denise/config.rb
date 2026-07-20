@@ -6,7 +6,7 @@ require "fileutils"
 module Denise
   # Reads and writes ~/.config/denise-cli/config.toml: sources (provider
   # instances, each with a unique alias and an encrypted API token), the
-  # zones under each source, and the DNS entries under each zone.
+  # zones under each source, and the DNS records under each zone.
   class Config
     SKELETON_COMMENT = "# DeNiSe CLI configuration - see `denise help add-provider` to get started.\n\n"
 
@@ -95,7 +95,7 @@ module Denise
       zones = (src["zones"] ||= [])
       raise ZoneConflictError, zone_name if zones.any? { |z| z["name"] == zone_name }
 
-      zones << { "name" => zone_name, "entries" => [] }
+      zones << { "name" => zone_name, "records" => [] }
       save
     end
 
@@ -121,10 +121,10 @@ module Denise
     end
 
     # Reconciles a source's zones against a live list of zone names from its
-    # provider: adds zones that are new (with an empty entries list) and
+    # provider: adds zones that are new (with an empty records list) and
     # drops zones that no longer exist there (along with their locally
-    # tracked entries). Zones present in both are left untouched, so their
-    # entries survive. Returns the added/removed zone names for reporting.
+    # tracked records). Zones present in both are left untouched, so their
+    # records survive. Returns the added/removed zone names for reporting.
     def sync_zones(provider_alias, zone_names)
       zones = (source(provider_alias)["zones"] ||= [])
       existing_names = zones.map { |z| z["name"] }
@@ -133,33 +133,33 @@ module Denise
       removed = existing_names - zone_names
 
       zones.reject! { |z| removed.include?(z["name"]) }
-      added.each { |name| zones << { "name" => name, "entries" => [] } }
+      added.each { |name| zones << { "name" => name, "records" => [] } }
 
       save
       { added: added, removed: removed }
     end
 
-    # -- entries ----------------------------------------------------------
+    # -- records ----------------------------------------------------------
 
-    def add_entry(zone_name, provider_alias:, name:, type:, value:, ttl: nil)
+    def add_record(zone_name, provider_alias:, name:, type:, value:, ttl: nil)
       zone = find_zone(provider_alias, zone_name)
-      entry = { "name" => name, "type" => type, "value" => value }
-      entry["ttl"] = ttl if ttl
-      (zone["entries"] ||= []) << entry
+      record = { "name" => name, "type" => type, "value" => value }
+      record["ttl"] = ttl if ttl
+      (zone["records"] ||= []) << record
       save
     end
 
-    def remove_entry(zone_name, provider_alias:, name:, type:)
-      entries = find_zone(provider_alias, zone_name)["entries"] ||= []
-      entry = entries.find { |e| e["name"] == name && e["type"] == type }
-      raise UnknownEntryError, name unless entry
+    def remove_record(zone_name, provider_alias:, name:, type:)
+      records = find_zone(provider_alias, zone_name)["records"] ||= []
+      record = records.find { |r| r["name"] == name && r["type"] == type }
+      raise UnknownRecordError, name unless record
 
-      entries.delete(entry)
+      records.delete(record)
       save
     end
 
-    def list_entries(zone_name, provider_alias:)
-      find_zone(provider_alias, zone_name)["entries"] || []
+    def list_records(zone_name, provider_alias:)
+      find_zone(provider_alias, zone_name)["records"] || []
     end
 
     private

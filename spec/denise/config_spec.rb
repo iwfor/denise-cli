@@ -153,9 +153,9 @@ RSpec.describe Denise::Config do
       expect(config.list_zones(provider_alias: "dh")).to eq([{ alias: "dh", name: "example.com" }])
     end
 
-    it "removes zones no longer present, dropping their entries" do
+    it "removes zones no longer present, dropping their records" do
       config.add_zone("gone.com", provider_alias: "dh")
-      config.add_entry("gone.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
+      config.add_record("gone.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
 
       result = config.sync_zones("dh", [])
 
@@ -163,15 +163,15 @@ RSpec.describe Denise::Config do
       expect(config.list_zones(provider_alias: "dh")).to eq([])
     end
 
-    it "leaves zones present in both untouched, preserving their entries" do
+    it "leaves zones present in both untouched, preserving their records" do
       config.add_zone("staying.com", provider_alias: "dh")
-      config.add_entry("staying.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
+      config.add_record("staying.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
 
       result = config.sync_zones("dh", ["staying.com"])
 
       expect(result).to eq(added: [], removed: [])
-      entries = config.list_entries("staying.com", provider_alias: "dh")
-      expect(entries).to eq([{ "name" => "www", "type" => "A", "value" => "1.2.3.4" }])
+      records = config.list_records("staying.com", provider_alias: "dh")
+      expect(records).to eq([{ "name" => "www", "type" => "A", "value" => "1.2.3.4" }])
     end
 
     it "adds and removes in the same call" do
@@ -187,31 +187,31 @@ RSpec.describe Denise::Config do
     end
   end
 
-  describe "entries" do
+  describe "records" do
     before do
       config.add_source(provider: "dreamhost", token: "t1", alias_name: "dh")
       config.add_zone("example.com", provider_alias: "dh")
     end
 
-    it "adds and lists entries for a zone" do
-      config.add_entry("example.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4", ttl: 300)
+    it "adds and lists records for a zone" do
+      config.add_record("example.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4", ttl: 300)
 
-      entries = config.list_entries("example.com", provider_alias: "dh")
-      expect(entries).to eq([{ "name" => "www", "type" => "A", "value" => "1.2.3.4", "ttl" => 300 }])
+      records = config.list_records("example.com", provider_alias: "dh")
+      expect(records).to eq([{ "name" => "www", "type" => "A", "value" => "1.2.3.4", "ttl" => 300 }])
     end
 
-    it "removes a matching entry" do
-      config.add_entry("example.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
+    it "removes a matching record" do
+      config.add_record("example.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
 
-      config.remove_entry("example.com", provider_alias: "dh", name: "www", type: "A")
+      config.remove_record("example.com", provider_alias: "dh", name: "www", type: "A")
 
-      expect(config.list_entries("example.com", provider_alias: "dh")).to eq([])
+      expect(config.list_records("example.com", provider_alias: "dh")).to eq([])
     end
 
-    it "raises for an unknown entry" do
+    it "raises for an unknown record" do
       expect do
-        config.remove_entry("example.com", provider_alias: "dh", name: "missing", type: "A")
-      end.to raise_error(Denise::UnknownEntryError)
+        config.remove_record("example.com", provider_alias: "dh", name: "missing", type: "A")
+      end.to raise_error(Denise::UnknownRecordError)
     end
   end
 
@@ -249,7 +249,7 @@ RSpec.describe Denise::Config do
     it "omits token_encrypted while keeping everything else" do
       config.add_source(provider: "dreamhost", token: "super-secret", alias_name: "dh", default: true)
       config.add_zone("example.com", provider_alias: "dh")
-      config.add_entry("example.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
+      config.add_record("example.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
 
       toml = config.to_toml_without_secrets
 

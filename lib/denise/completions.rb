@@ -27,7 +27,7 @@ module Denise
 
     # Every switch (short and long form) for a command's own options plus
     # the global class options (-p/--provider, -v/--verbose), so e.g.
-    # `denise add-entry <TAB>` suggests --zone/--type/--value/--ttl too.
+    # `denise add-record <TAB>` suggests --zone/--type/--value/--ttl too.
     # -h/--help are added explicitly: CLI.dispatch handles them for any
     # command, but they're not declared options, so they aren't in
     # command.options or CLI.class_options to be picked up automatically.

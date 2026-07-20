@@ -10,8 +10,8 @@ module Denise
     end
 
     # Thor's built-in -h/--help only work as the very first word (it checks
-    # HELP_MAPPINGS against argv[0] only), so `denise add-entry -h` would
-    # otherwise be parsed as an unrecognized option for add-entry rather than
+    # HELP_MAPPINGS against argv[0] only), so `denise add-record -h` would
+    # otherwise be parsed as an unrecognized option for add-record rather than
     # showing its help. Catch -h/--help anywhere in a command's own args and
     # redirect to `help COMMAND` before Thor's normal dispatch ever runs.
     def self.dispatch(meth, given_args, given_opts, config)
@@ -110,7 +110,7 @@ module Denise
     def remove_provider(alias_name)
       @config.source(alias_name)
 
-      unless options[:yes] || yes?("Remove provider '#{alias_name}' and all its zones/entries? (y/N)")
+      unless options[:yes] || yes?("Remove provider '#{alias_name}' and all its zones/records? (y/N)")
         say "Aborted."
         return
       end
@@ -182,30 +182,30 @@ module Denise
       error_exit(e)
     end
 
-    desc "add-entry NAME", "Add a DNS entry to a zone"
-    method_option :zone, aliases: "-z", required: true, desc: "Zone to add the entry to"
+    desc "add-record NAME", "Add a DNS record to a zone"
+    method_option :zone, aliases: "-z", required: true, desc: "Zone to add the record to"
     method_option :type, required: true, desc: "Record type (A, AAAA, CNAME, TXT, MX, ...)"
     method_option :value, required: true, desc: "Record value"
     method_option :ttl, type: :numeric, desc: "Time to live in seconds"
-    def add_entry(name)
+    def add_record(name)
       zone, type, value, ttl = options.values_at("zone", "type", "value", "ttl")
       alias_name = resolve_provider_alias(zone: zone)
 
       provider_client(alias_name).create_record(zone: zone, name: name, type: type, value: value, ttl: ttl)
-      @config.add_entry(zone, provider_alias: alias_name, name: name, type: type, value: value, ttl: ttl)
-      say "Added #{type} entry '#{name}' to zone '#{zone}' (#{alias_name})."
+      @config.add_record(zone, provider_alias: alias_name, name: name, type: type, value: value, ttl: ttl)
+      say "Added #{type} record '#{name}' to zone '#{zone}' (#{alias_name})."
     rescue Error => e
       error_exit(e)
     end
 
-    desc "list-entries", "List DNS entries denise has added to a zone (from local config, not a live query)"
-    method_option :zone, aliases: "-z", required: true, desc: "Zone to list entries for"
-    def list_entries
+    desc "list-records", "List DNS records denise has added to a zone (from local config, not a live query)"
+    method_option :zone, aliases: "-z", required: true, desc: "Zone to list records for"
+    def list_records
       alias_name = resolve_provider_alias(zone: options[:zone])
-      rows = @config.list_entries(options[:zone], provider_alias: alias_name)
-                    .map { |e| [e["name"], e["type"], e["value"], e["ttl"]] }
+      rows = @config.list_records(options[:zone], provider_alias: alias_name)
+                    .map { |r| [r["name"], r["type"], r["value"], r["ttl"]] }
       if rows.empty?
-        say "No entries configured for '#{options[:zone]}'."
+        say "No records configured for '#{options[:zone]}'."
         return
       end
       print_table([%w[NAME TYPE VALUE TTL], *rows])
@@ -213,16 +213,16 @@ module Denise
       error_exit(e)
     end
 
-    desc "remove-entry NAME", "Remove a DNS entry from a zone"
-    method_option :zone, aliases: "-z", required: true, desc: "Zone the entry belongs to"
-    method_option :type, required: true, desc: "Record type of the entry to remove"
-    def remove_entry(name)
+    desc "remove-record NAME", "Remove a DNS record from a zone"
+    method_option :zone, aliases: "-z", required: true, desc: "Zone the record belongs to"
+    method_option :type, required: true, desc: "Record type of the record to remove"
+    def remove_record(name)
       zone, type = options.values_at("zone", "type")
       alias_name = resolve_provider_alias(zone: zone)
 
       provider_client(alias_name).delete_record(zone: zone, name: name, type: type)
-      @config.remove_entry(zone, provider_alias: alias_name, name: name, type: type)
-      say "Removed #{type} entry '#{name}' from zone '#{zone}' (#{alias_name})."
+      @config.remove_record(zone, provider_alias: alias_name, name: name, type: type)
+      say "Removed #{type} record '#{name}' from zone '#{zone}' (#{alias_name})."
     rescue Error => e
       error_exit(e)
     end

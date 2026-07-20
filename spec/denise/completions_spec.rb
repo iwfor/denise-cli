@@ -5,7 +5,7 @@ require "tempfile"
 RSpec.describe Denise::Completions do
   describe ".commands" do
     it "lists every CLI command except help, hyphenated" do
-      expect(described_class.commands).to include("add-entry", "add-provider", "config", "refresh-zones")
+      expect(described_class.commands).to include("add-record", "add-provider", "config", "refresh-zones")
       expect(described_class.commands).not_to include("help")
     end
   end
@@ -20,7 +20,7 @@ RSpec.describe Denise::Completions do
 
   describe ".flags_for" do
     it "includes a command's own options and the global class options" do
-      flags = described_class.flags_for("add-entry")
+      flags = described_class.flags_for("add-record")
 
       expect(flags).to include("-z", "--zone", "--type", "--value", "--ttl", "-p", "--provider", "-v", "--verbose")
     end
@@ -44,14 +44,14 @@ RSpec.describe Denise::Completions do
     it "lists every command plus --completions and -h/--help at the top level" do
       script = described_class.bash_script
 
-      expect(script).to include("add-entry add-provider add-zone config")
+      expect(script).to include("add-provider add-record add-zone config")
       expect(script).to include("--completions -h --help")
     end
 
     it "has a case branch offering each command's flags" do
       script = described_class.bash_script
 
-      expect(script).to include('add-entry) COMPREPLY=($(compgen -W "-z --zone --type --value --ttl ' \
+      expect(script).to include('add-record) COMPREPLY=($(compgen -W "-z --zone --type --value --ttl ' \
                                 '-p --provider -v --verbose -h --help" -- "$cur")) ;;')
     end
 
@@ -68,7 +68,7 @@ RSpec.describe Denise::Completions do
     it "lists every command plus --completions and -h/--help at the top level" do
       script = described_class.zsh_script
 
-      expect(script).to include("add-entry add-provider add-zone config")
+      expect(script).to include("add-provider add-record add-zone config")
       expect(script).to include("--completions -h --help")
     end
 
@@ -76,7 +76,7 @@ RSpec.describe Denise::Completions do
       script = described_class.zsh_script
 
       expect(script).to include(
-        "add-entry) flags=(-z --zone --type --value --ttl -p --provider -v --verbose -h --help) ;;"
+        "add-record) flags=(-z --zone --type --value --ttl -p --provider -v --verbose -h --help) ;;"
       )
     end
 
