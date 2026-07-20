@@ -63,4 +63,27 @@ RSpec.describe Denise::CLI do
       expect(entries).to eq([{ "name" => "www", "type" => "A", "value" => "1.2.3.4" }])
     end
   end
+
+  describe "help" do
+    it "shows a header and documents --completions when no command is given" do
+      output = capture_stdout { described_class.start(["help"]) }
+
+      expect(output).to include("DeNiSe CLI")
+      expect(output).to include("--completions")
+    end
+
+    it "shows the same header for the bare invocation (no arguments)" do
+      output = capture_stdout { described_class.start([]) }
+
+      expect(output).to include("DeNiSe CLI")
+      expect(output).to include("--completions")
+    end
+
+    it "does not repeat the header or --completions for a specific command" do
+      output = capture_stdout { described_class.start(%w[help version]) }
+
+      expect(output).not_to include("DeNiSe CLI")
+      expect(output).not_to include("--completions")
+    end
+  end
 end

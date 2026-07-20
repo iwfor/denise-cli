@@ -2,6 +2,7 @@
 
 require_relative "../lib/denise"
 require "tmpdir"
+require "stringio"
 
 RSpec.configure do |config|
   config.mock_with :rspec do |mocks|
@@ -28,6 +29,17 @@ def silence_output
 ensure
   $stdout = original_stdout
   $stderr = original_stderr
+end
+
+# Runs the block with $stdout replaced by a StringIO and returns what was
+# written to it, for specs that assert on help/output text.
+def capture_stdout
+  original_stdout = $stdout
+  $stdout = StringIO.new
+  yield
+  $stdout.string
+ensure
+  $stdout = original_stdout
 end
 
 # Writes raw TOML directly to config.toml, bypassing Denise::Config, to

@@ -124,6 +124,13 @@ so it works without a subcommand).
 Thor command methods use underscores (`add_provider`); Thor normalizes hyphenated CLI input to underscores for
 dispatch, so `denise add-provider` and the `desc` help text both show the hyphenated form.
 
+`CLI#help` overrides Thor's built-in `help` command (matching its `(command = nil, subcommand = false)`
+signature exactly, since Thor calls it positionally via both `super` and its own internal dispatch — see the
+`rubocop:disable Style/OptionalBooleanParameter` comment). With no command given it prints a one-line tool
+description and, after `super`, a "Global flags" section documenting `--completions` — which otherwise
+wouldn't appear anywhere in the help output, since it's intercepted in `bin/denise` before Thor ever sees it.
+`denise help COMMAND` (a specific command) skips both additions.
+
 ## Conventions
 
 - **Test everything.** Every new module, command, or behavior change needs RSpec coverage in `spec/` before

@@ -16,6 +16,24 @@ module Denise
       @config = Config.new
     end
 
+    desc "help [COMMAND]", "Describe available commands or one specific command"
+    # rubocop:disable Style/OptionalBooleanParameter -- must match Thor's own help(command, subcommand)
+    # signature exactly; Thor calls it positionally both via `super` and its own internal dispatch.
+    def help(command = nil, subcommand = false)
+      if command.nil?
+        say "DeNiSe CLI - a hobbyist DNS manager for Cloudflare, DreamHost, and AWS Route 53."
+        say
+      end
+
+      super
+
+      return if command
+
+      say "Global flags:"
+      print_table([["--completions [bash|zsh]", "Print a shell completion script (defaults to $SHELL)"]], indent: 2)
+    end
+    # rubocop:enable Style/OptionalBooleanParameter
+
     desc "add-provider PROVIDER", "Add a new provider source (cloudflare, dreamhost, aws)"
     method_option :alias, desc: "Alias for this source (defaults to the provider's default alias)"
     method_option :token,
