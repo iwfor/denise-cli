@@ -186,10 +186,15 @@ before Thor ever sees it, and `-h`/`--help` are just Thor's built-in `HELP_MAPPI
 aliased to the `help` command) rather than a declared option, so Thor never lists them either.
 `denise help COMMAND` (a specific command) skips both additions.
 
-**`-h`/`--help` only work as the very first word** (`denise -h`, `denise --help`) — Thor's dispatch checks
-`HELP_MAPPINGS` against `argv[0]` only, so `denise add-entry --help` does *not* show `add-entry`'s help; it's
-parsed as a regular (unrecognized) option for that command instead. `Completions.top_level` documents this by
-only offering `-h`/`--help` at the top level, never inside a command's own `flags_for`.
+**`denise COMMAND -h`/`--help` works too**, not just `-h`/`--help` as the very first word. Thor's own
+`HELP_MAPPINGS` only checks `argv[0]`, so without help `denise add-entry --help` would be parsed as a regular
+(unrecognized) option for `add-entry` instead of showing its help. `CLI.dispatch` is overridden to catch
+`-h`/`--help` anywhere in a command's own args *before* Thor's normal dispatch runs, and redirects to
+`help COMMAND` instead — see the method comment for the exact mechanics (it works by reconstructing the args
+Thor's own dispatch expects for invoking `help` with a command name, not by calling the command and then
+intercepting). Because of this, `-h`/`--help` are added to every command's completions in
+`Completions.flags_for` explicitly (they aren't a declared `method_option`/`class_option`, so they can't be
+picked up automatically the way other flags are).
 
 ## Conventions
 

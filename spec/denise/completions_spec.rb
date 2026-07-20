@@ -25,8 +25,14 @@ RSpec.describe Denise::Completions do
       expect(flags).to include("-z", "--zone", "--type", "--value", "--ttl", "-p", "--provider", "-v", "--verbose")
     end
 
-    it "returns only the global class options for a command with none of its own" do
-      expect(described_class.flags_for("list-providers")).to contain_exactly("-p", "--provider", "-v", "--verbose")
+    it "always includes -h/--help, even though it isn't a declared option" do
+      expect(described_class.flags_for("list-providers")).to include("-h", "--help")
+    end
+
+    it "returns only the global class options (plus -h/--help) for a command with none of its own" do
+      flags = described_class.flags_for("list-providers")
+
+      expect(flags).to contain_exactly("-p", "--provider", "-v", "--verbose", "-h", "--help")
     end
 
     it "returns an empty array for an unknown command" do
@@ -46,7 +52,7 @@ RSpec.describe Denise::Completions do
       script = described_class.bash_script
 
       expect(script).to include('add-entry) COMPREPLY=($(compgen -W "-z --zone --type --value --ttl ' \
-                                '-p --provider -v --verbose" -- "$cur")) ;;')
+                                '-p --provider -v --verbose -h --help" -- "$cur")) ;;')
     end
 
     it "is syntactically valid bash" do
@@ -69,7 +75,9 @@ RSpec.describe Denise::Completions do
     it "has a case branch offering each command's flags" do
       script = described_class.zsh_script
 
-      expect(script).to include("add-entry) flags=(-z --zone --type --value --ttl -p --provider -v --verbose) ;;")
+      expect(script).to include(
+        "add-entry) flags=(-z --zone --type --value --ttl -p --provider -v --verbose -h --help) ;;"
+      )
     end
 
     it "is syntactically valid zsh" do

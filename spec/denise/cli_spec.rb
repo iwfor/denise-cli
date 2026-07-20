@@ -203,5 +203,34 @@ RSpec.describe Denise::CLI do
 
       expect(output).to include("DeNiSe CLI")
     end
+
+    it "shows a command's own help for `command -h`, instead of running it" do
+      expect(Denise::Providers).not_to receive(:client_for)
+
+      output = capture_stdout { described_class.start(%w[add-entry -h]) }
+
+      expect(output).to include("Usage:")
+      expect(output).to include("Add a DNS entry to a zone")
+    end
+
+    it "shows a command's own help for `command --help`, instead of running it" do
+      expect(Denise::Providers).not_to receive(:client_for)
+
+      output = capture_stdout { described_class.start(%w[add-entry --help]) }
+
+      expect(output).to include("Usage:")
+      expect(output).to include("Add a DNS entry to a zone")
+    end
+
+    it "finds -h/--help wherever it appears among a command's other args" do
+      expect(Denise::Providers).not_to receive(:client_for)
+
+      output = capture_stdout do
+        described_class.start(%w[add-entry www --type A --value 1.2.3.4 -z example.com -h])
+      end
+
+      expect(output).to include("Usage:")
+      expect(output).to include("Add a DNS entry to a zone")
+    end
   end
 end

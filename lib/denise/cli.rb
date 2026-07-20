@@ -9,6 +9,20 @@ module Denise
       true
     end
 
+    # Thor's built-in -h/--help only work as the very first word (it checks
+    # HELP_MAPPINGS against argv[0] only), so `denise add-entry -h` would
+    # otherwise be parsed as an unrecognized option for add-entry rather than
+    # showing its help. Catch -h/--help anywhere in a command's own args and
+    # redirect to `help COMMAND` before Thor's normal dispatch ever runs.
+    def self.dispatch(meth, given_args, given_opts, config)
+      command_name = given_args.first
+      if meth.nil? && command_name && command_name !~ /\A-/ && given_args.intersect?(%w[-h --help])
+        return super(nil, ["help", command_name], given_opts, config)
+      end
+
+      super
+    end
+
     class_option :provider, aliases: "-p", desc: "Source alias to operate on (defaults to the default provider)"
     class_option :verbose, aliases: "-v", type: :boolean, default: false,
                            desc: "Print HTTP requests/responses to providers (never includes tokens or secrets)"

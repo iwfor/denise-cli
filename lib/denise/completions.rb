@@ -28,11 +28,15 @@ module Denise
     # Every switch (short and long form) for a command's own options plus
     # the global class options (-p/--provider, -v/--verbose), so e.g.
     # `denise add-entry <TAB>` suggests --zone/--type/--value/--ttl too.
+    # -h/--help are added explicitly: CLI.dispatch handles them for any
+    # command, but they're not declared options, so they aren't in
+    # command.options or CLI.class_options to be picked up automatically.
     def flags_for(command_name)
       command = CLI.commands[command_name.tr("-", "_")]
       return [] unless command
 
-      (command.options.values + CLI.class_options.values).flat_map { |opt| [*opt.aliases, opt.switch_name] }
+      switches = (command.options.values + CLI.class_options.values).flat_map { |opt| [*opt.aliases, opt.switch_name] }
+      switches + ["-h", "--help"]
     end
 
     def bash_script
@@ -93,10 +97,6 @@ module Denise
       ZSH
     end
 
-    # -h/--help only work as the very first word (Thor only checks
-    # HELP_MAPPINGS against argv[0] - denise add-entry --help does NOT show
-    # add-entry's help), so they belong here and not in any command's own
-    # flags_for.
     def top_level
       commands + ["--completions", "-h", "--help"]
     end
