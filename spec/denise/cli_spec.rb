@@ -64,6 +64,26 @@ RSpec.describe Denise::CLI do
     end
   end
 
+  describe "config" do
+    it "creates a skeleton file and reports it when none exists" do
+      File.delete(Denise::Paths.config_file)
+
+      output = capture_stdout { described_class.start(["config"]) }
+
+      expect(output).to include("No config file found")
+      expect(File.exist?(Denise::Paths.config_file)).to be(true)
+    end
+
+    it "displays the existing configuration without secrets, and doesn't recreate the file" do
+      output = capture_stdout { described_class.start(["config"]) }
+
+      expect(output).not_to include("No config file found")
+      expect(output).not_to include("token_encrypted")
+      expect(output).to include('provider = "dreamhost"')
+      expect(output).to include('name = "example.com"')
+    end
+  end
+
   describe "help" do
     it "shows a header and documents --completions when no command is given" do
       output = capture_stdout { described_class.start(["help"]) }

@@ -12,7 +12,7 @@ Metrics/MethodLength:
   Max: 22
 
 Metrics/ClassLength:
-  Max: 170
+  Max: 185
 
 Metrics/ParameterLists:
   Max: 6
@@ -26,4 +26,10 @@ Metrics/BlockLength:
 
 # set_default_provider / set_default_source are CLI verbs, not writer accessors.
 Naming/AccessorMethodName:
+  Enabled: false
+
+# Methods like ensure_file! deliberately use the bang (side-effecting/may
+# create something) rather than a `?` suffix, even though they also return
+# a boolean for the caller's convenience - matches Crypto#ensure_key!.
+Naming/PredicateMethod:
   Enabled: false

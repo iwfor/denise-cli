@@ -25,4 +25,6 @@ Configuration
 Configuration lives in `~/.config/denise-cli/config.toml`. API tokens are
 encrypted at rest using a key auto-generated at `~/.config/denise-cli/key`
 (created with `0600` permissions on first run). Manage configuration entirely
-from the command line — see `denise help` for available commands.
+from the command line — see `denise help` for available commands. Run
+`denise config` to view the current configuration (secrets omitted); it
+creates a skeleton file first if one doesn't exist yet.

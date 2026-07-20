@@ -178,4 +178,43 @@ RSpec.describe Denise::Config do
     expect(reloaded.default_source_alias).to eq("dh")
     expect(reloaded.token_for("dh")).to eq("t1")
   end
+
+  describe "#ensure_file!" do
+    it "creates a skeleton config.toml when none exists and returns true" do
+      expect(File.exist?(Denise::Paths.config_file)).to be(false)
+
+      created = config.ensure_file!
+
+      expect(created).to be(true)
+      expect(File.exist?(Denise::Paths.config_file)).to be(true)
+      expect(File.read(Denise::Paths.config_file)).to include("DeNiSe CLI configuration")
+    end
+
+    it "does not overwrite an existing config.toml, and returns false" do
+      config.add_source(provider: "dreamhost", token: "t1")
+      before_contents = File.read(Denise::Paths.config_file)
+
+      created = config.ensure_file!
+
+      expect(created).to be(false)
+      expect(File.read(Denise::Paths.config_file)).to eq(before_contents)
+    end
+  end
+
+  describe "#to_toml_without_secrets" do
+    it "omits token_encrypted while keeping everything else" do
+      config.add_source(provider: "dreamhost", token: "super-secret", alias_name: "dh", default: true)
+      config.add_zone("example.com", provider_alias: "dh")
+      config.add_entry("example.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
+
+      toml = config.to_toml_without_secrets
+
+      expect(toml).not_to include("super-secret")
+      expect(toml).not_to include("token_encrypted")
+      expect(toml).to include('default_source = "dh"')
+      expect(toml).to include('provider = "dreamhost"')
+      expect(toml).to include('name = "example.com"')
+      expect(toml).to include('value = "1.2.3.4"')
+    end
+  end
 end

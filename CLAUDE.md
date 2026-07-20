@@ -50,6 +50,11 @@ rewriting the file immediately — so a plaintext token is never left on disk pa
 This also doubles as the manual-rotation path: a freshly hand-edited `token` always overwrites a stale
 `token_encrypted`. `token_for` raises `MissingTokenError` if a source has neither key.
 
+`denise config` displays the current config as TOML with every source's `token_encrypted` stripped out
+(`Config#to_toml_without_secrets`) — safe to paste into an issue or share for debugging. If `config.toml`
+doesn't exist yet, `Config#ensure_file!` creates a skeleton (a one-line comment plus an empty `[sources]`
+table) before displaying it, so this command also doubles as "give me a config.toml to hand-edit."
+
 ### Data model
 
 A **source** is one configured instance of a provider: a provider type (`cloudflare`, `dreamhost`, ...), an
@@ -115,6 +120,7 @@ explicit positional argument, plus a confirmation prompt (skippable with `-y/--y
 
 ## Commands
 
+`config`,
 `add-provider` / `list-providers` / `remove-provider` / `set-default-provider`,
 `add-zone` / `list-zones` / `remove-zone`,
 `add-entry` / `list-entries` / `remove-entry`,

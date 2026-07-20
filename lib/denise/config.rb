@@ -8,6 +8,8 @@ module Denise
   # instances, each with a unique alias and an encrypted API token), the
   # zones under each source, and the DNS entries under each zone.
   class Config
+    SKELETON_COMMENT = "# DeNiSe CLI configuration - see `denise help add-provider` to get started.\n\n"
+
     attr_reader :path
 
     def initialize(path: Paths.config_file, crypto: Crypto.new)
@@ -66,6 +68,24 @@ module Denise
 
       @data["default_source"] = alias_name
       save
+    end
+
+    # Writes a skeleton config.toml if one doesn't exist yet. Returns
+    # whether it created one, so callers can tell the user what happened.
+    def ensure_file!
+      return false if File.exist?(@path)
+
+      FileUtils.mkdir_p(File.dirname(@path))
+      File.write(@path, "#{SKELETON_COMMENT}#{Tomlib.dump(@data)}")
+      true
+    end
+
+    # The full config as TOML, with every source's token_encrypted omitted.
+    def to_toml_without_secrets
+      redacted = {}
+      redacted["default_source"] = @data["default_source"] if @data["default_source"]
+      redacted["sources"] = sources.transform_values { |src| src.except("token_encrypted") }
+      Tomlib.dump(redacted)
     end
 
     # -- zones ------------------------------------------------------------

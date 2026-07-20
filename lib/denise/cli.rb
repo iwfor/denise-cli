@@ -34,6 +34,15 @@ module Denise
     end
     # rubocop:enable Style/OptionalBooleanParameter
 
+    desc "config", "Display the configuration, without secrets (creates a skeleton file if none exists)"
+    def config
+      if @config.ensure_file!
+        say "No config file found; created a skeleton at #{@config.path}."
+        say
+      end
+      puts @config.to_toml_without_secrets
+    end
+
     desc "add-provider PROVIDER", "Add a new provider source (cloudflare, dreamhost, aws)"
     method_option :alias, desc: "Alias for this source (defaults to the provider's default alias)"
     method_option :token,
