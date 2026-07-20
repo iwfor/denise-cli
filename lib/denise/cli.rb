@@ -10,9 +10,12 @@ module Denise
     end
 
     class_option :provider, aliases: "-p", desc: "Source alias to operate on (defaults to the default provider)"
+    class_option :verbose, aliases: "-v", type: :boolean, default: false,
+                           desc: "Print HTTP requests/responses to providers (never includes tokens or secrets)"
 
     def initialize(*args)
       super
+      Denise.verbose = options[:verbose]
       @config = Config.new
     end
 

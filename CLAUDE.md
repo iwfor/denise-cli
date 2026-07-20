@@ -136,6 +136,23 @@ header from the same published algorithm (not by calling the implementation's ow
 comparing — the crypto equivalent of the live-smoke-test principle above: don't let a test validate an
 implementation against itself.
 
+### Verbose logging (`-v`/`--verbose`)
+
+A class option on every command (`Denise.verbose`, a simple module-level flag set once in `CLI#initialize` -
+not threaded through every method call, since this is a single-threaded CLI, not a server). Each provider
+client's private `request` calls `Base#log` before/after the HTTP call, printing method/path/params/body and
+the response status to stderr (`warn`, gated on `Denise.verbose`) - stdout stays reserved for actual command
+output.
+
+**The secret-safety rule that shapes this:** `#log` is only ever called with method/path/params/body/status -
+never with headers, and never with `@token`/`@secret_access_key` directly. This matters most for DreamHost,
+where the plaintext API key travels as a `key=` query param on every request: `Dreamhost#request` builds its
+log line from `cmd`/`params` (the method's own arguments, which never include `key`), not from the `query`
+hash actually sent over the wire (which does). Cloudflare and AWS carry their secrets in the `Authorization`
+header instead, which `#log` never touches at all. `spec/denise/providers/*_spec.rb` has an explicit
+"verbose logging" example per provider asserting the token/secret string is absent from captured output, not
+just that logging happens - see `capture_stderr` in `spec/spec_helper.rb`.
+
 ### Provider resolution (`-p`/`--provider`)
 
 Used by every zone/entry command via `CLI#resolve_provider_alias`, in this order:
@@ -178,7 +195,9 @@ wouldn't appear anywhere in the help output, since it's intercepted in `bin/deni
   - `bundle exec bundler-audit check --update`
 - `Style/StringLiterals` is configured for double-quoted strings project-wide.
 - New provider integrations belong under `lib/denise/providers/` as a `Denise::Providers::Base` subclass, then
-  registered in `Denise::Providers::KNOWN` and `Denise::Providers.client_for`.
+  registered in `Denise::Providers::KNOWN` and `Denise::Providers.client_for`. Wire its private `request`
+  method to call `#log` (see Verbose logging above) - and add a "verbose logging" spec asserting the
+  token/secret is absent from captured output, not just that a log line was produced.
 - **7-day age gate on new Gemfile dependencies.** Before adding any gem, check its release date on
   rubygems.org (`https://rubygems.org/api/v1/versions/<gem>.json`) and pin the Gemfile to the newest version
   that is at least 7 days old as of the current date (exact pin, e.g. `gem "rubocop", "1.88.2"`, not `~>`).

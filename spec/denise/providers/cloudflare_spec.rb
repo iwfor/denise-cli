@@ -107,4 +107,31 @@ RSpec.describe Denise::Providers::Cloudflare do
       expect(provider.list_zones).to eq(%w[example.com example.net])
     end
   end
+
+  describe "verbose logging" do
+    let(:secret_provider) { described_class.new(token: "super-secret-cf-token-xyz", connection: connection) }
+
+    it "logs the request and response when Denise.verbose is true, without the token" do
+      Denise.verbose = true
+      stubs.get("/client/v4/zones") { [200, {}, { success: true, result: [{ "id" => "zone123" }] }.to_json] }
+      stubs.get("/client/v4/zones/zone123/dns_records") do
+        [200, {}, { success: true, result: [] }.to_json]
+      end
+
+      output = capture_stderr { secret_provider.list_records(zone: "example.com") }
+
+      expect(output).to include("GET zones/zone123/dns_records")
+      expect(output).to include("HTTP 200")
+      expect(output).not_to include("super-secret-cf-token-xyz")
+    end
+
+    it "logs nothing when Denise.verbose is false" do
+      stubs.get("/client/v4/zones") { [200, {}, { success: true, result: [{ "id" => "zone123" }] }.to_json] }
+      stubs.get("/client/v4/zones/zone123/dns_records") { [200, {}, { success: true, result: [] }.to_json] }
+
+      output = capture_stderr { secret_provider.list_records(zone: "example.com") }
+
+      expect(output).to eq("")
+    end
+  end
 end

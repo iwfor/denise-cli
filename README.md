@@ -33,3 +33,7 @@ creates a skeleton file first if one doesn't exist yet.
 manages at the provider. Run `denise refresh-zones` any time afterward to
 pick up zones added or removed at the provider since — for a specific
 source with `-p ALIAS`, or every configured source if `-p` is omitted.
+
+Pass `-v`/`--verbose` (after the command, e.g. `denise refresh-zones -v`) to
+print each HTTP request and response status to stderr. Tokens and secrets
+are never included, however verbose you get.

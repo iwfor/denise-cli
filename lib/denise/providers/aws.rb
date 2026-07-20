@@ -114,13 +114,20 @@ module Denise
         bare == zone ? "@" : bare.delete_suffix(".#{zone}")
       end
 
+      # params/body here are only ever zone names, record names/types/values,
+      # and pagination markers - never the Authorization/X-Amz-Date headers
+      # signed_headers computes, so it's always safe to log in full.
       def request(method, path, params: nil, body: nil)
+        query = params ? "?#{params.map { |k, v| "#{k}=#{v}" }.join('&')}" : ""
+        log("#{method.to_s.upcase} #{path}#{query}#{" body=#{body}" if body}")
+
         response = connection.public_send(method) do |req|
           req.url(path, params || {})
           signed_headers(method, path, params: params, body: body).each { |k, v| req.headers[k] = v }
           req.headers["Content-Type"] = "application/xml" if body
           req.body = body if body
         end
+        log("-> HTTP #{response.status}")
         parse(response)
       end
 

@@ -55,9 +55,14 @@ module Denise
         record == zone ? "@" : record.delete_suffix(".#{zone}")
       end
 
+      # Builds the log line from `cmd`/`params` only, never from `query` -
+      # `query` is the only place the plaintext API key (`key:`) ever exists,
+      # and it must never reach #log.
       def request(cmd, **params)
+        log("GET cmd=#{cmd}#{params.map { |k, v| " #{k}=#{v}" }.join}")
         query = { key: @token, cmd: cmd, format: "json", unique_id: SecureRandom.uuid }.merge(params)
         response = connection.get("/", query)
+        log("-> HTTP #{response.status}")
         parse(response)
       end
 

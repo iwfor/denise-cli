@@ -110,4 +110,27 @@ RSpec.describe Denise::Providers::Dreamhost do
       expect(provider.list_zones).to eq(%w[example.com other.com])
     end
   end
+
+  describe "verbose logging" do
+    let(:secret_provider) { described_class.new(token: "super-secret-dh-key-xyz", connection: connection) }
+
+    it "logs cmd/params and the response when Denise.verbose is true, without the API key" do
+      Denise.verbose = true
+      stubs.get("/") { [200, {}, { result: "success", data: [] }.to_json] }
+
+      output = capture_stderr { secret_provider.list_zones }
+
+      expect(output).to include("GET cmd=dns-list_records")
+      expect(output).to include("HTTP 200")
+      expect(output).not_to include("super-secret-dh-key-xyz")
+    end
+
+    it "logs nothing when Denise.verbose is false" do
+      stubs.get("/") { [200, {}, { result: "success", data: [] }.to_json] }
+
+      output = capture_stderr { secret_provider.list_zones }
+
+      expect(output).to eq("")
+    end
+  end
 end

@@ -231,5 +231,47 @@ RSpec.describe Denise::Providers::Aws do
         expect(provider.list_zones).to eq(%w[example.com example.net])
       end
     end
+
+    describe "verbose logging" do
+      let(:secret_provider) do
+        described_class.new(token: "AKIDEXAMPLE:super-secret-aws-key-xyz", connection: connection)
+      end
+
+      it "logs the request and response when Denise.verbose is true, without the secret key or signature" do
+        Denise.verbose = true
+        stubs.get("/2013-04-01/hostedzone") do
+          body = <<~XML
+            <ListHostedZonesResponse xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+              <HostedZones/>
+              <IsTruncated>false</IsTruncated>
+            </ListHostedZonesResponse>
+          XML
+          [200, {}, body]
+        end
+
+        output = capture_stderr { secret_provider.list_zones }
+
+        expect(output).to include("GET hostedzone")
+        expect(output).to include("HTTP 200")
+        expect(output).not_to include("super-secret-aws-key-xyz")
+        expect(output).not_to include("AWS4-HMAC-SHA256")
+      end
+
+      it "logs nothing when Denise.verbose is false" do
+        stubs.get("/2013-04-01/hostedzone") do
+          body = <<~XML
+            <ListHostedZonesResponse xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+              <HostedZones/>
+              <IsTruncated>false</IsTruncated>
+            </ListHostedZonesResponse>
+          XML
+          [200, {}, body]
+        end
+
+        output = capture_stderr { secret_provider.list_zones }
+
+        expect(output).to eq("")
+      end
+    end
   end
 end

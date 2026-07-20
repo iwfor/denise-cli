@@ -16,6 +16,8 @@ RSpec.configure do |config|
     end
     ENV.delete("DENISE_CONFIG_DIR")
   end
+
+  config.after { Denise.verbose = false }
 end
 
 # Swallows Thor's say/print_table/warn output so CLI specs don't spam the
@@ -40,6 +42,18 @@ def capture_stdout
   $stdout.string
 ensure
   $stdout = original_stdout
+end
+
+# Runs the block with $stderr replaced by a StringIO and returns what was
+# written to it, for specs that assert on `warn`-based output (e.g. verbose
+# provider logging).
+def capture_stderr
+  original_stderr = $stderr
+  $stderr = StringIO.new
+  yield
+  $stderr.string
+ensure
+  $stderr = original_stderr
 end
 
 # Writes raw TOML directly to config.toml, bypassing Denise::Config, to

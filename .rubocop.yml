@@ -20,6 +20,9 @@ Metrics/ParameterLists:
 Metrics/AbcSize:
   Max: 23
 
+Metrics/CyclomaticComplexity:
+  Max: 8
+
 Metrics/BlockLength:
   Exclude:
     - "spec/**/*"

@@ -14,4 +14,12 @@ require_relative "denise/completions"
 require_relative "denise/cli"
 
 module Denise
+  class << self
+    # Set from -v/--verbose by Denise::CLI; read by provider clients to
+    # decide whether to print request/response diagnostics. Never gates
+    # anything that touches token/secret values - see Providers::Base#log.
+    attr_accessor :verbose
+  end
+
+  self.verbose = false
 end

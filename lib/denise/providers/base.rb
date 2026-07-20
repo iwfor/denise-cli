@@ -38,6 +38,15 @@ module Denise
       def build_connection
         raise NotImplementedError, "#{self.class} must implement #build_connection"
       end
+
+      # Only called by subclasses with method/path/params/status - never with
+      # headers or a token/secret. Writes to stderr, gated on Denise.verbose,
+      # so `-v` never touches what a command prints to stdout.
+      def log(message)
+        return unless Denise.verbose
+
+        warn "[#{self.class.name.split('::').last}] #{message}"
+      end
     end
   end
 end

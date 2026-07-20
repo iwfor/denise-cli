@@ -139,6 +139,20 @@ RSpec.describe Denise::CLI do
     end
   end
 
+  describe "-v/--verbose" do
+    it "sets Denise.verbose when passed" do
+      silence_output { described_class.start(%w[version -v]) }
+
+      expect(Denise.verbose).to be(true)
+    end
+
+    it "leaves Denise.verbose false when omitted" do
+      silence_output { described_class.start(["version"]) }
+
+      expect(Denise.verbose).to be(false)
+    end
+  end
+
   describe "config" do
     it "creates a skeleton file and reports it when none exists" do
       File.delete(Denise::Paths.config_file)
