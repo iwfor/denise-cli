@@ -205,6 +205,56 @@ RSpec.describe Denise::CLI do
     end
   end
 
+  describe "search" do
+    before do
+      Denise::Config.new.add_record("example.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
+    end
+
+    it "finds matches under the default provider when -p is omitted" do
+      output = capture_stdout { described_class.start(%w[search www]) }
+
+      expect(output).to include("dh")
+      expect(output).to include("example.com")
+      expect(output).to include("1.2.3.4")
+    end
+
+    it "reports no matches for a query that doesn't hit anything" do
+      output = capture_stdout { described_class.start(%w[search nonesuch]) }
+
+      expect(output).to include("No matches for 'nonesuch'")
+    end
+
+    it "searches every provider with the virtual alias -p all" do
+      Denise::Config.new.add_source(provider: "cloudflare", token: "cftok", alias_name: "cf")
+      Denise::Config.new.add_zone("other.com", provider_alias: "cf")
+      Denise::Config.new.add_record("other.com", provider_alias: "cf", name: "app", type: "A", value: "5.6.7.8")
+
+      output = capture_stdout { described_class.start(%w[search . -p all]) }
+
+      expect(output).to include("dh")
+      expect(output).to include("cf")
+      expect(output).to include("other.com")
+    end
+
+    it "restricts matches to the categories given in --limit" do
+      output = capture_stdout { described_class.start(%w[search 1.2.3.4 --limit zones,names]) }
+
+      expect(output).to include("No matches for '1.2.3.4'")
+    end
+
+    it "exits with an error for an unknown --limit category" do
+      expect do
+        silence_output { described_class.start(%w[search www --limit bogus]) }
+      end.to raise_error(SystemExit)
+    end
+
+    it "exits with an error for an unknown -p alias" do
+      expect do
+        silence_output { described_class.start(%w[search www -p nope]) }
+      end.to raise_error(SystemExit)
+    end
+  end
+
   describe "-v/--verbose" do
     it "sets Denise.verbose when passed" do
       silence_output { described_class.start(%w[version -v]) }

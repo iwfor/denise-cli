@@ -58,6 +58,12 @@ module Denise
     end
   end
 
+  class InvalidSearchLimitError < Error
+    def initialize(unknown, valid)
+      super("unknown --limit categories: #{unknown.join(', ')} (expected #{valid.join(',')})")
+    end
+  end
+
   class NoProviderError < Error
     def initialize
       super("no provider specified and no default provider is set")

@@ -215,6 +215,66 @@ RSpec.describe Denise::Config do
     end
   end
 
+  describe "#search" do
+    before do
+      config.add_source(provider: "dreamhost", token: "t1", alias_name: "dh")
+      config.add_zone("example.com", provider_alias: "dh")
+      config.add_zone("staging-example.net", provider_alias: "dh")
+      config.add_record("example.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
+      config.add_record("example.com", provider_alias: "dh", name: "mail", type: "CNAME", value: "www.example.com")
+    end
+
+    it "matches a zone name" do
+      hits = config.search("staging", provider_alias: "dh")
+
+      expect(hits).to eq([{ zone: "staging-example.net", match: "zone" }])
+    end
+
+    it "matches a record name" do
+      hits = config.search("mail", provider_alias: "dh")
+
+      expect(hits).to eq([{ zone: "example.com", match: "name", name: "mail", type: "CNAME",
+                            value: "www.example.com", ttl: nil }])
+    end
+
+    it "matches a record value" do
+      hits = config.search("1.2.3.4", provider_alias: "dh")
+
+      expect(hits).to eq([{ zone: "example.com", match: "value", name: "www", type: "A", value: "1.2.3.4",
+                            ttl: nil }])
+    end
+
+    it "reports both fields matched when the query hits a record's name and value" do
+      config.add_record("example.com", provider_alias: "dh", name: "www", type: "TXT", value: "see www for info")
+
+      hits = config.search("www", provider_alias: "dh")
+
+      expect(hits).to contain_exactly(
+        { zone: "example.com", match: "name", name: "www", type: "A", value: "1.2.3.4", ttl: nil },
+        { zone: "example.com", match: "value", name: "mail", type: "CNAME", value: "www.example.com", ttl: nil },
+        { zone: "example.com", match: "name,value", name: "www", type: "TXT", value: "see www for info", ttl: nil }
+      )
+    end
+
+    it "is case-insensitive" do
+      hits = config.search("MAIL", provider_alias: "dh")
+
+      expect(hits.size).to eq(1)
+    end
+
+    it "restricts matching to the given categories" do
+      hits = config.search("www", provider_alias: "dh", categories: %w[values])
+
+      expect(hits).to eq(
+        [{ zone: "example.com", match: "value", name: "mail", type: "CNAME", value: "www.example.com", ttl: nil }]
+      )
+    end
+
+    it "raises for an unknown provider alias" do
+      expect { config.search("www", provider_alias: "nope") }.to raise_error(Denise::UnknownSourceError)
+    end
+  end
+
   it "persists across instances" do
     config.add_source(provider: "dreamhost", token: "t1")
 

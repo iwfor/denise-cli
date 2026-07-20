@@ -12,7 +12,7 @@ Metrics/MethodLength:
   Max: 22
 
 Metrics/ClassLength:
-  Max: 235
+  Max: 245
 
 Metrics/ParameterLists:
   Max: 6

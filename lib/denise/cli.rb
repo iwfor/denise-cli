@@ -231,6 +231,18 @@ module Denise
       error_exit(e)
     end
 
+    desc "search QUERY", "Search zone names, record names, and record values (case-insensitive, local config only)"
+    method_option :limit, desc: "Comma-separated categories to search: zones,names,values (default: all)"
+    def search(query)
+      aliases = Search.provider_aliases(@config, options[:provider]) { resolve_provider_alias }
+      rows = Search.rows(@config, query, aliases, Search.categories(options[:limit]))
+      return say "No matches for '#{query}'." if rows.empty?
+
+      print_table([%w[PROVIDER ZONE MATCH NAME TYPE VALUE TTL], *rows])
+    rescue Error => e
+      error_exit(e)
+    end
+
     desc "version", "Print the denise version"
     def version
       say VERSION

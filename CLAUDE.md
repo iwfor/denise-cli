@@ -180,12 +180,26 @@ Used by every zone/record command via `CLI#resolve_provider_alias`, in this orde
 `remove-provider` is the one exception: it never falls back to the default and always requires the alias as an
 explicit positional argument, plus a confirmation prompt (skippable with `-y/--yes`).
 
+`search` is the other exception: `-p/--provider` additionally accepts the virtual alias `all`, meaning "every
+configured source" (`CLI#search_provider_aliases`), instead of resolving to a single one. Without `-p`, it
+still falls back to the default provider like everything else — `all` must be given explicitly.
+
+### Search (`search QUERY`)
+
+Local-config-only (like `list-records` — no live query), case-insensitive substring search across a source's
+zone names, record names, and record values (`Config#search`, `Config::SEARCH_CATEGORIES`). `-p/--provider`
+picks which source(s) to search — a single alias, the default provider if omitted, or every source via the
+virtual alias `all` (see Provider resolution above). `--limit zones,names,values` restricts which of the three
+categories are searched (`CLI#search_categories`; unknown categories raise `InvalidSearchLimitError`). Each
+result row reports which field(s) matched (`zone`, `name`, `value`, or `name,value` if both matched on the
+same record) alongside the provider alias, zone, and (for record hits) type/value/ttl.
+
 ## Commands
 
 `config`,
 `add-provider` / `list-providers` / `remove-provider` / `set-default-provider`,
 `add-zone` / `list-zones` / `remove-zone` / `refresh-zones`,
-`add-record` / `list-records` / `remove-record`,
+`add-record` / `list-records` / `remove-record` / `search`,
 `version`, and `--completions [bash|zsh]` (defaults to `$SHELL`; handled in `bin/denise`, not a Thor command,
 so it works without a subcommand).
 

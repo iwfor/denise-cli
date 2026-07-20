@@ -162,7 +162,45 @@ module Denise
       find_zone(provider_alias, zone_name)["records"] || []
     end
 
+    # -- search -------------------------------------------------------------
+
+    SEARCH_CATEGORIES = %w[zones names values].freeze
+
+    # Case-insensitive substring search over one source's zone names, record
+    # names, and record values. Returns an array of hit hashes: a zone hit is
+    # `{ zone:, match: "zone" }`; a record hit is `{ zone:, match:, name:,
+    # type:, value:, ttl: }` where match is "name", "value", or "name,value"
+    # depending on which field(s) matched.
+    def search(query, provider_alias:, categories: SEARCH_CATEGORIES)
+      needle = query.downcase
+      (source(provider_alias)["zones"] || []).flat_map { |zone| search_zone(zone, needle, categories) }
+    end
+
     private
+
+    def search_zone(zone, needle, categories)
+      hits = []
+      if categories.include?("zones") && zone["name"].downcase.include?(needle)
+        hits << { zone: zone["name"],
+                  match: "zone" }
+      end
+
+      (zone["records"] || []).each do |record|
+        matched = record_match(record, needle, categories)
+        next if matched.empty?
+
+        hits << { zone: zone["name"], match: matched.join(","), name: record["name"], type: record["type"],
+                  value: record["value"], ttl: record["ttl"] }
+      end
+      hits
+    end
+
+    def record_match(record, needle, categories)
+      matched = []
+      matched << "name" if categories.include?("names") && record["name"].downcase.include?(needle)
+      matched << "value" if categories.include?("values") && record["value"].downcase.include?(needle)
+      matched
+    end
 
     def find_zone(provider_alias, zone_name)
       zone = (source(provider_alias)["zones"] || []).find { |z| z["name"] == zone_name }
