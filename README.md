@@ -28,3 +28,8 @@ encrypted at rest using a key auto-generated at `~/.config/denise-cli/key`
 from the command line — see `denise help` for available commands. Run
 `denise config` to view the current configuration (secrets omitted); it
 creates a skeleton file first if one doesn't exist yet.
+
+`denise add-provider` automatically imports the zones that key/account
+manages at the provider. Run `denise refresh-zones` any time afterward to
+pick up zones added or removed at the provider since — for a specific
+source with `-p ALIAS`, or every configured source if `-p` is omitted.

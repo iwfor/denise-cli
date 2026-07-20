@@ -31,6 +31,20 @@ module Denise
         end
       end
 
+      def list_zones
+        zones = []
+        page = 1
+        loop do
+          data = request(:get, "zones", params: { page: page, per_page: 50 })
+          zones.concat(data.fetch("result").map { |z| z["name"] })
+          total_pages = data.dig("result_info", "total_pages") || 1
+          break if page >= total_pages
+
+          page += 1
+        end
+        zones
+      end
+
       private
 
       def find_record(zone, name:, type:)

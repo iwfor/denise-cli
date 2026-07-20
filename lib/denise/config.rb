@@ -120,6 +120,25 @@ module Denise
       sources.select { |_a, src| (src["zones"] || []).any? { |z| z["name"] == zone_name } }.keys
     end
 
+    # Reconciles a source's zones against a live list of zone names from its
+    # provider: adds zones that are new (with an empty entries list) and
+    # drops zones that no longer exist there (along with their locally
+    # tracked entries). Zones present in both are left untouched, so their
+    # entries survive. Returns the added/removed zone names for reporting.
+    def sync_zones(provider_alias, zone_names)
+      zones = (source(provider_alias)["zones"] ||= [])
+      existing_names = zones.map { |z| z["name"] }
+
+      added = zone_names - existing_names
+      removed = existing_names - zone_names
+
+      zones.reject! { |z| removed.include?(z["name"]) }
+      added.each { |name| zones << { "name" => name, "entries" => [] } }
+
+      save
+      { added: added, removed: removed }
+    end
+
     # -- entries ----------------------------------------------------------
 
     def add_entry(zone_name, provider_alias:, name:, type:, value:, ttl: nil)

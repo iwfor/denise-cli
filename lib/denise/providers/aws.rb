@@ -55,6 +55,21 @@ module Denise
         end
       end
 
+      def list_zones
+        zones = []
+        marker = nil
+        loop do
+          doc = request(:get, "hostedzone", params: marker ? { marker: marker } : nil)
+          doc.get_elements("//HostedZones/HostedZone").each { |hz| zones << hz.text("Name").delete_suffix(".") }
+
+          break unless doc.get_elements("//IsTruncated").first&.text == "true"
+
+          marker = doc.get_elements("//NextMarker").first&.text
+          break unless marker
+        end
+        zones
+      end
+
       private
 
       def change_record(action, zone:, name:, type:, value:, ttl:)

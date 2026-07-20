@@ -82,4 +82,29 @@ RSpec.describe Denise::Providers::Cloudflare do
       )
     end
   end
+
+  describe "#list_zones" do
+    it "returns every zone name on the account, following pagination" do
+      stubs.get("/client/v4/zones") do |env|
+        case env.params["page"]
+        when "1"
+          body = {
+            success: true,
+            result: [{ "name" => "example.com" }],
+            result_info: { page: 1, total_pages: 2 }
+          }
+          [200, {}, body.to_json]
+        when "2"
+          body = {
+            success: true,
+            result: [{ "name" => "example.net" }],
+            result_info: { page: 2, total_pages: 2 }
+          }
+          [200, {}, body.to_json]
+        end
+      end
+
+      expect(provider.list_zones).to eq(%w[example.com example.net])
+    end
+  end
 end

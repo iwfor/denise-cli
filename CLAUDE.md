@@ -16,7 +16,8 @@ A thrown together simple DNS manager for hobbyists, written in Ruby.
 - `lib/denise/config.rb` — reads/writes `config.toml`; source/zone/entry CRUD, alias resolution
 - `lib/denise/crypto.rb` — key management + AES-256-GCM encrypt/decrypt for tokens
 - `lib/denise/providers.rb` — registry of known providers, their default aliases, and `client_for` factory
-- `lib/denise/providers/base.rb` — shared provider client interface (`create_record`/`delete_record`/`list_records`)
+- `lib/denise/providers/base.rb` — shared provider client interface
+  (`create_record`/`delete_record`/`list_records`/`list_zones`)
 - `lib/denise/providers/cloudflare.rb` — Cloudflare v4 API client (Bearer token, zone-id lookup/cache)
 - `lib/denise/providers/dreamhost.rb` — DreamHost API client (key-based query auth, no zone/TTL params)
 - `lib/denise/providers/aws.rb` — AWS Route 53 client (hand-rolled SigV4 signing, REST-XML API)
@@ -70,13 +71,42 @@ aliases differ.
 
 Zones live under their source; entries (DNS records: name/type/value/ttl) live under their zone.
 
+### Zone import / refresh
+
+`add-provider` imports the source's zones from the live API right after creating it
+(`CLI#sync_zones_for` → `provider_client(alias).list_zones` → `Config#sync_zones`), so a source starts
+populated instead of empty. Import failure doesn't roll back the source or fail the command - it's caught and
+printed as a warning pointing at `refresh-zones`, since a bad/under-scoped token shouldn't block adding the
+source itself.
+
+`refresh-zones` re-runs the same sync: `-p ALIAS` for one source, or every configured source if `-p` is
+omitted. `Config#sync_zones(alias, live_zone_names)` diffs against the locally stored zone list - new zones
+are added with empty entries, zones no longer present are dropped **along with their locally tracked
+entries**, and zones present in both are left untouched (so their entries survive). There's no confirmation
+prompt before removing a zone/its entries, unlike `remove-provider` - this command's whole point is
+"make local state match the live API," so a removal here just means the CLI has already caught up to a
+change made at the provider, not a new destructive action of its own.
+
+When refreshing multiple sources, `refresh_zones` validates every alias exists in one pass *before* doing any
+work (so a typoed `-p` aborts cleanly), then syncs each source in a second pass where a single source's live
+API failure is caught and reported per-source rather than aborting the rest (`rubocop:disable
+Style/CombinableLoops` marks this as deliberate, not an oversight).
+
 ### Provider clients
 
 `add-entry`/`remove-entry` call the live provider (`Denise::Providers.client_for(provider_type, token:)`) and
 only touch local config *after* the API call succeeds — a failed API call leaves local config untouched, so it
 never drifts from what's actually live. `list-entries` is the one exception: it reads local config only (no
 network call), so it shows what denise has provisioned, not necessarily everything that exists in the zone
-(records created outside denise won't show up).
+(records created outside denise won't show up). Zones, by contrast, are actively synced from the live API by
+`add-provider`/`refresh-zones` (see above) — `list-zones` still just reads local config, but that config is
+kept in sync rather than being denise's own record of what it separately provisioned.
+
+DreamHost's `#list_zones` has no dedicated API to call: DreamHost removed its account/domain-management
+commands, leaving `dns-list_records` (which returns every record for every domain on the account, each
+tagged with a `zone`) as the only way to discover which zones exist - so it's derived as the unique `zone`
+values from that same call `#list_records` already uses. A domain with zero DNS records wouldn't show up this
+way, but that's a real limitation of DreamHost's current API, not a bug in ours.
 
 Every provider client subclasses `Denise::Providers::Base` and implements `create_record`/`delete_record`/
 `list_records`, raising `Denise::ProviderError` on any API/network failure. `initialize(token:, connection:
@@ -122,7 +152,7 @@ explicit positional argument, plus a confirmation prompt (skippable with `-y/--y
 
 `config`,
 `add-provider` / `list-providers` / `remove-provider` / `set-default-provider`,
-`add-zone` / `list-zones` / `remove-zone`,
+`add-zone` / `list-zones` / `remove-zone` / `refresh-zones`,
 `add-entry` / `list-entries` / `remove-entry`,
 `version`, and `--completions [bash|zsh]` (defaults to `$SHELL`; handled in `bin/denise`, not a Thor command,
 so it works without a subcommand).

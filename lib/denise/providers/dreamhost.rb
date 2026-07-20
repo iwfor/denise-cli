@@ -6,14 +6,15 @@ require "securerandom"
 
 module Denise
   module Providers
-    # https://help.dreamhost.com/hc/en-us/articles/217560167-DNS-API-commands
+    # https://help.dreamhost.com/hc/en-us/articles/217555707-DNS-API-commands
     #
     # DreamHost's API is a single flat command endpoint: every DNS record for
     # every domain on the account comes back from dns-list_records, and there
     # is no zone parameter to add/remove_record, so records are addressed by
     # their fully-qualified name. There is also no TTL parameter — DreamHost
     # manages TTL server-side, so `ttl:` is accepted for interface parity and
-    # otherwise ignored.
+    # otherwise ignored. There's also no domain/zone-management command
+    # anymore (DreamHost removed those from the API) - see #list_zones.
     class Dreamhost < Base
       API_URL = "https://api.dreamhost.com"
 
@@ -34,6 +35,14 @@ module Denise
         request("dns-list_records").select { |r| r["zone"] == zone }.map do |r|
           { "name" => unqualify(r["record"], zone), "type" => r["type"], "value" => r["value"], "ttl" => nil }
         end
+      end
+
+      # DreamHost has no domain/zone-listing command (account-management API
+      # commands were removed - see class comment), so this is derived from
+      # the same dns-list_records call as #list_records: every record is
+      # tagged with the zone it belongs to.
+      def list_zones
+        request("dns-list_records").map { |r| r["zone"] }.uniq
       end
 
       private

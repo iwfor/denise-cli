@@ -59,6 +59,13 @@ module Denise
       )
       default_note = @config.default_source_alias == alias_name ? " (default)" : ""
       say "Added #{provider} as '#{alias_name}'#{default_note}."
+
+      begin
+        sync_zones_for(alias_name)
+      rescue Error => e
+        warn "denise: could not import zones for '#{alias_name}' (#{e.message}); " \
+             "try `denise refresh-zones -p #{alias_name}` later."
+      end
     rescue Error => e
       error_exit(e)
     end
@@ -126,6 +133,29 @@ module Denise
       alias_name = resolve_provider_alias
       @config.remove_zone(zone, provider_alias: alias_name)
       say "Removed zone '#{zone}' from '#{alias_name}'."
+    rescue Error => e
+      error_exit(e)
+    end
+
+    desc "refresh-zones", "Refresh zones from the live API for -p/--provider, or every source if omitted"
+    def refresh_zones
+      aliases = options[:provider] ? [options[:provider]] : @config.sources.keys
+      if aliases.empty?
+        say "No providers configured."
+        return
+      end
+      # Two passes on purpose: validate every alias exists before doing any
+      # work, so an invalid -p aborts cleanly instead of syncing some
+      # sources before failing partway through.
+      aliases.each { |a| @config.source(a) }
+
+      # rubocop:disable Style/CombinableLoops
+      aliases.each do |alias_name|
+        sync_zones_for(alias_name)
+      rescue Error => e
+        warn "denise: #{alias_name}: #{e.message}"
+      end
+      # rubocop:enable Style/CombinableLoops
     rescue Error => e
       error_exit(e)
     end
@@ -205,6 +235,22 @@ module Denise
     def provider_client(alias_name)
       src = @config.source(alias_name)
       Providers.client_for(src["provider"], token: @config.token_for(alias_name))
+    end
+
+    def sync_zones_for(alias_name)
+      zone_names = provider_client(alias_name).list_zones
+      result = @config.sync_zones(alias_name, zone_names)
+      report_zone_sync(alias_name, result)
+    end
+
+    def report_zone_sync(alias_name, result)
+      added, removed = result.values_at(:added, :removed)
+      if added.empty? && removed.empty?
+        say "#{alias_name}: zones up to date."
+        return
+      end
+      say "#{alias_name}: added #{added.join(', ')}." if added.any?
+      say "#{alias_name}: removed #{removed.join(', ')}." if removed.any?
     end
 
     def prompt_token(provider)

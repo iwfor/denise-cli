@@ -92,4 +92,22 @@ RSpec.describe Denise::Providers::Dreamhost do
       )
     end
   end
+
+  describe "#list_zones" do
+    it "returns the unique zones across every record on the account" do
+      stubs.get("/") do
+        body = {
+          result: "success",
+          data: [
+            { "zone" => "example.com", "record" => "www.example.com", "type" => "A", "value" => "1.2.3.4" },
+            { "zone" => "example.com", "record" => "example.com", "type" => "A", "value" => "5.6.7.8" },
+            { "zone" => "other.com", "record" => "www.other.com", "type" => "A", "value" => "9.9.9.9" }
+          ]
+        }
+        [200, {}, body.to_json]
+      end
+
+      expect(provider.list_zones).to eq(%w[example.com other.com])
+    end
+  end
 end

@@ -201,5 +201,35 @@ RSpec.describe Denise::Providers::Aws do
         )
       end
     end
+
+    describe "#list_zones" do
+      it "returns every hosted zone name on the account, following the Marker pagination" do
+        stubs.get("/2013-04-01/hostedzone") do |env|
+          body = if env.params["marker"]
+                   <<~XML
+                     <ListHostedZonesResponse xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+                       <HostedZones>
+                         <HostedZone><Name>example.net.</Name></HostedZone>
+                       </HostedZones>
+                       <IsTruncated>false</IsTruncated>
+                     </ListHostedZonesResponse>
+                   XML
+                 else
+                   <<~XML
+                     <ListHostedZonesResponse xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+                       <HostedZones>
+                         <HostedZone><Name>example.com.</Name></HostedZone>
+                       </HostedZones>
+                       <IsTruncated>true</IsTruncated>
+                       <NextMarker>abc123</NextMarker>
+                     </ListHostedZonesResponse>
+                   XML
+                 end
+          [200, {}, body]
+        end
+
+        expect(provider.list_zones).to eq(%w[example.com example.net])
+      end
+    end
   end
 end

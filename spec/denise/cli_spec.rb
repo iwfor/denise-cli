@@ -64,6 +64,81 @@ RSpec.describe Denise::CLI do
     end
   end
 
+  describe "add-provider" do
+    it "imports zones from the live API after creating the source" do
+      client = instance_double(Denise::Providers::Cloudflare)
+      allow(Denise::Providers).to receive(:client_for).with("cloudflare", token: "cftoken").and_return(client)
+      allow(client).to receive(:list_zones).and_return(%w[example.net example.org])
+
+      silence_output { described_class.start(%w[add-provider cloudflare --token cftoken --alias cf]) }
+
+      zones = Denise::Config.new.list_zones(provider_alias: "cf").map { |z| z[:name] }
+      expect(zones).to contain_exactly("example.net", "example.org")
+    end
+
+    it "still adds the source even when zone import fails" do
+      client = instance_double(Denise::Providers::Cloudflare)
+      allow(Denise::Providers).to receive(:client_for).and_return(client)
+      allow(client).to receive(:list_zones).and_raise(Denise::ProviderError, "boom")
+
+      silence_output { described_class.start(%w[add-provider cloudflare --token cftoken --alias cf]) }
+
+      expect(Denise::Config.new.sources).to have_key("cf")
+    end
+  end
+
+  describe "refresh-zones" do
+    it "syncs zones for -p ALIAS only" do
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).with("dreamhost", token: "t1").and_return(client)
+      allow(client).to receive(:list_zones).and_return(%w[example.com example.net])
+
+      silence_output { described_class.start(%w[refresh-zones -p dh]) }
+
+      zones = Denise::Config.new.list_zones(provider_alias: "dh").map { |z| z[:name] }
+      expect(zones).to contain_exactly("example.com", "example.net")
+    end
+
+    it "syncs every source when -p is omitted" do
+      Denise::Config.new.add_source(provider: "cloudflare", token: "cftok", alias_name: "cf")
+
+      dh_client = instance_double(Denise::Providers::Dreamhost)
+      cf_client = instance_double(Denise::Providers::Cloudflare)
+      allow(Denise::Providers).to receive(:client_for).with("dreamhost", token: "t1").and_return(dh_client)
+      allow(Denise::Providers).to receive(:client_for).with("cloudflare", token: "cftok").and_return(cf_client)
+      allow(dh_client).to receive(:list_zones).and_return([])
+      allow(cf_client).to receive(:list_zones).and_return(["zone-from-cf.com"])
+
+      silence_output { described_class.start(["refresh-zones"]) }
+
+      expect(Denise::Config.new.list_zones(provider_alias: "dh")).to eq([])
+      cf_zones = Denise::Config.new.list_zones(provider_alias: "cf").map { |z| z[:name] }
+      expect(cf_zones).to eq(["zone-from-cf.com"])
+    end
+
+    it "exits with an error for an unknown -p alias" do
+      expect do
+        silence_output { described_class.start(%w[refresh-zones -p nope]) }
+      end.to raise_error(SystemExit)
+    end
+
+    it "continues past a per-source failure and still syncs the others" do
+      Denise::Config.new.add_source(provider: "cloudflare", token: "cftok", alias_name: "cf")
+
+      dh_client = instance_double(Denise::Providers::Dreamhost)
+      cf_client = instance_double(Denise::Providers::Cloudflare)
+      allow(Denise::Providers).to receive(:client_for).with("dreamhost", token: "t1").and_return(dh_client)
+      allow(Denise::Providers).to receive(:client_for).with("cloudflare", token: "cftok").and_return(cf_client)
+      allow(dh_client).to receive(:list_zones).and_raise(Denise::ProviderError, "boom")
+      allow(cf_client).to receive(:list_zones).and_return(["zone-from-cf.com"])
+
+      silence_output { described_class.start(["refresh-zones"]) }
+
+      cf_zones = Denise::Config.new.list_zones(provider_alias: "cf").map { |z| z[:name] }
+      expect(cf_zones).to eq(["zone-from-cf.com"])
+    end
+  end
+
   describe "config" do
     it "creates a skeleton file and reports it when none exists" do
       File.delete(Denise::Paths.config_file)

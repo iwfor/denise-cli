@@ -143,6 +143,50 @@ RSpec.describe Denise::Config do
     end
   end
 
+  describe "#sync_zones" do
+    before { config.add_source(provider: "dreamhost", token: "t1", alias_name: "dh") }
+
+    it "adds zones that are new" do
+      result = config.sync_zones("dh", ["example.com"])
+
+      expect(result).to eq(added: ["example.com"], removed: [])
+      expect(config.list_zones(provider_alias: "dh")).to eq([{ alias: "dh", name: "example.com" }])
+    end
+
+    it "removes zones no longer present, dropping their entries" do
+      config.add_zone("gone.com", provider_alias: "dh")
+      config.add_entry("gone.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
+
+      result = config.sync_zones("dh", [])
+
+      expect(result).to eq(added: [], removed: ["gone.com"])
+      expect(config.list_zones(provider_alias: "dh")).to eq([])
+    end
+
+    it "leaves zones present in both untouched, preserving their entries" do
+      config.add_zone("staying.com", provider_alias: "dh")
+      config.add_entry("staying.com", provider_alias: "dh", name: "www", type: "A", value: "1.2.3.4")
+
+      result = config.sync_zones("dh", ["staying.com"])
+
+      expect(result).to eq(added: [], removed: [])
+      entries = config.list_entries("staying.com", provider_alias: "dh")
+      expect(entries).to eq([{ "name" => "www", "type" => "A", "value" => "1.2.3.4" }])
+    end
+
+    it "adds and removes in the same call" do
+      config.add_zone("gone.com", provider_alias: "dh")
+
+      result = config.sync_zones("dh", ["new.com"])
+
+      expect(result).to eq(added: ["new.com"], removed: ["gone.com"])
+    end
+
+    it "raises for an unknown provider alias" do
+      expect { config.sync_zones("nope", []) }.to raise_error(Denise::UnknownSourceError)
+    end
+  end
+
   describe "entries" do
     before do
       config.add_source(provider: "dreamhost", token: "t1", alias_name: "dh")
