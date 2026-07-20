@@ -32,6 +32,41 @@ RSpec.describe Denise::CLI do
       records = Denise::Config.new.list_records("example.com", provider_alias: "dh")
       expect(records).to eq([])
     end
+
+    it "infers type A from an IPv4 --value when --type is omitted" do
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).with("dreamhost", token: "t1").and_return(client)
+      expect(client).to receive(:create_record)
+        .with(zone: "example.com", name: "www", type: "A", value: "1.2.3.4", ttl: nil)
+
+      silence_output { described_class.start(%w[add-record www --value 1.2.3.4 -z example.com]) }
+
+      records = Denise::Config.new.list_records("example.com", provider_alias: "dh")
+      expect(records).to eq([{ "name" => "www", "type" => "A", "value" => "1.2.3.4" }])
+    end
+
+    it "infers type AAAA from an IPv6 --value when --type is omitted" do
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).with("dreamhost", token: "t1").and_return(client)
+      expect(client).to receive(:create_record)
+        .with(zone: "example.com", name: "www", type: "AAAA", value: "2001:db8::1", ttl: nil)
+
+      silence_output { described_class.start(%w[add-record www --value 2001:db8::1 -z example.com]) }
+
+      records = Denise::Config.new.list_records("example.com", provider_alias: "dh")
+      expect(records).to eq([{ "name" => "www", "type" => "AAAA", "value" => "2001:db8::1" }])
+    end
+
+    it "exits with an error when --type is omitted and --value isn't an IP address" do
+      expect(Denise::Providers).not_to receive(:client_for)
+
+      expect do
+        silence_output { described_class.start(%w[add-record www --value target.example.com -z example.com]) }
+      end.to raise_error(SystemExit)
+
+      records = Denise::Config.new.list_records("example.com", provider_alias: "dh")
+      expect(records).to eq([])
+    end
   end
 
   describe "remove-record" do
@@ -61,6 +96,37 @@ RSpec.describe Denise::CLI do
 
       records = Denise::Config.new.list_records("example.com", provider_alias: "dh")
       expect(records).to eq([{ "name" => "www", "type" => "A", "value" => "1.2.3.4" }])
+    end
+
+    it "infers the type from the local record when the name is unambiguous" do
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).with("dreamhost", token: "t1").and_return(client)
+      expect(client).to receive(:delete_record).with(zone: "example.com", name: "www", type: "A")
+
+      silence_output { described_class.start(%w[remove-record www -z example.com]) }
+
+      records = Denise::Config.new.list_records("example.com", provider_alias: "dh")
+      expect(records).to eq([])
+    end
+
+    it "exits with an error and requires --type when the name matches records of multiple types" do
+      Denise::Config.new.add_record("example.com", provider_alias: "dh", name: "www", type: "AAAA", value: "::1")
+      expect(Denise::Providers).not_to receive(:client_for)
+
+      expect do
+        silence_output { described_class.start(%w[remove-record www -z example.com]) }
+      end.to raise_error(SystemExit)
+
+      records = Denise::Config.new.list_records("example.com", provider_alias: "dh")
+      expect(records.size).to eq(2)
+    end
+
+    it "exits with an error when --type is omitted and no record matches the name" do
+      expect(Denise::Providers).not_to receive(:client_for)
+
+      expect do
+        silence_output { described_class.start(%w[remove-record missing -z example.com]) }
+      end.to raise_error(SystemExit)
     end
   end
 

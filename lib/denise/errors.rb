@@ -39,6 +39,19 @@ module Denise
     end
   end
 
+  class RecordTypeRequiredError < Error
+    def initialize(value)
+      super("cannot infer record type from value '#{value}'; specify --type " \
+            "(only A/AAAA are inferred, from an IPv4/IPv6 --value)")
+    end
+  end
+
+  class AmbiguousRecordTypeError < Error
+    def initialize(name, types)
+      super("record '#{name}' has multiple types (#{types.join(', ')}); specify --type")
+    end
+  end
+
   class AmbiguousZoneError < Error
     def initialize(zone_name, aliases)
       super("zone '#{zone_name}' exists under multiple sources (#{aliases.join(', ')}); specify -p/--provider")

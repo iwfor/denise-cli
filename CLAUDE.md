@@ -23,6 +23,8 @@ A thrown together simple DNS manager for hobbyists, written in Ruby.
 - `lib/denise/providers/aws.rb` — AWS Route 53 client (hand-rolled SigV4 signing, REST-XML API)
 - `lib/denise/paths.rb` — config directory/file path resolution (`DENISE_CONFIG_DIR` override for tests)
 - `lib/denise/completions.rb` — bash/zsh completion script generation
+- `lib/denise/record_types.rb` — infers/resolves a record's type when `--type` is omitted (see Record type
+  inference below)
 - `lib/denise/errors.rb` — typed error classes, each rescued in the CLI and printed as `denise: <message>`
 - `lib/denise/version.rb` — version constant
 - `spec/` — RSpec tests (each example runs against a fresh `Dir.mktmpdir` config dir)
@@ -112,6 +114,19 @@ Every provider client subclasses `Denise::Providers::Base` and implements `creat
 `list_records`, raising `Denise::ProviderError` on any API/network failure. `initialize(token:, connection:
 nil)` accepts an injectable Faraday connection so specs can stub HTTP via `Faraday::Adapter::Test::Stubs`
 without touching the network — see `spec/denise/providers/*_spec.rb`.
+
+### Record type inference (`--type`)
+
+`--type` is optional on both `add-record` and `remove-record`; the fallback lives in `Denise::RecordTypes`
+(`lib/denise/record_types.rb`), kept out of `CLI` to stay under `Metrics/ClassLength`.
+
+- `add-record`: `RecordTypes.infer(value)` parses `--value` with `IPAddr` and returns `"A"`/`"AAAA"` for a
+  valid IPv4/IPv6 address, or raises `RecordTypeRequiredError` otherwise. Only A/AAAA are inferable this way —
+  a CNAME/TXT/MX value isn't a distinguishable shape, so those always need an explicit `--type`.
+- `remove-record`: `RecordTypes.resolve(records, name)` looks at the zone's locally configured records (not a
+  live query) with a matching name: exactly one match resolves silently, zero raises `UnknownRecordError`, and
+  more than one (e.g. a name with both an A and a TXT record) raises `AmbiguousRecordTypeError` asking for
+  `--type` to disambiguate.
 
 **Gotcha that already bit us once:** stubbed specs can be self-consistently wrong about the base URL if the
 bug is in how the base URL and request path are joined, because the same (buggy) construction is used on both

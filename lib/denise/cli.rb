@@ -184,11 +184,14 @@ module Denise
 
     desc "add-record NAME", "Add a DNS record to a zone"
     method_option :zone, aliases: "-z", required: true, desc: "Zone to add the record to"
-    method_option :type, required: true, desc: "Record type (A, AAAA, CNAME, TXT, MX, ...)"
+    method_option :type,
+                  desc: "Record type (A, AAAA, CNAME, TXT, MX, ...); if omitted, inferred as A/AAAA " \
+                        "from --value when it's an IPv4/IPv6 address"
     method_option :value, required: true, desc: "Record value"
     method_option :ttl, type: :numeric, desc: "Time to live in seconds"
     def add_record(name)
-      zone, type, value, ttl = options.values_at("zone", "type", "value", "ttl")
+      zone, value, ttl = options.values_at("zone", "value", "ttl")
+      type = options[:type] || RecordTypes.infer(value)
       alias_name = resolve_provider_alias(zone: zone)
 
       provider_client(alias_name).create_record(zone: zone, name: name, type: type, value: value, ttl: ttl)
@@ -215,10 +218,11 @@ module Denise
 
     desc "remove-record NAME", "Remove a DNS record from a zone"
     method_option :zone, aliases: "-z", required: true, desc: "Zone the record belongs to"
-    method_option :type, required: true, desc: "Record type of the record to remove"
+    method_option :type, desc: "Record type of the record to remove; required only if the name is ambiguous"
     def remove_record(name)
-      zone, type = options.values_at("zone", "type")
+      zone = options[:zone]
       alias_name = resolve_provider_alias(zone: zone)
+      type = options[:type] || RecordTypes.resolve(@config.list_records(zone, provider_alias: alias_name), name)
 
       provider_client(alias_name).delete_record(zone: zone, name: name, type: type)
       @config.remove_record(zone, provider_alias: alias_name, name: name, type: type)
