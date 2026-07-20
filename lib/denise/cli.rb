@@ -16,12 +16,14 @@ module Denise
       @config = Config.new
     end
 
-    desc "add-provider PROVIDER", "Add a new provider source (cloudflare, dreamhost)"
+    desc "add-provider PROVIDER", "Add a new provider source (cloudflare, dreamhost, aws)"
     method_option :alias, desc: "Alias for this source (defaults to the provider's default alias)"
-    method_option :token, desc: "API token (prompted securely if omitted)"
+    method_option :token,
+                  desc: "API token, prompted securely if omitted " \
+                        "(aws: ACCESS_KEY_ID:SECRET_ACCESS_KEY)"
     method_option :default, type: :boolean, default: false, desc: "Make this the default provider"
     def add_provider(provider)
-      token = options[:token] || prompt_token
+      token = options[:token] || prompt_token(provider)
       alias_name = @config.add_source(
         provider: provider,
         token: token,
@@ -178,8 +180,9 @@ module Denise
       Providers.client_for(src["provider"], token: @config.token_for(alias_name))
     end
 
-    def prompt_token
-      print "API token: "
+    def prompt_token(provider)
+      label = provider == "aws" ? "AWS token (ACCESS_KEY_ID:SECRET_ACCESS_KEY)" : "API token"
+      print "#{label}: "
       token = $stdin.noecho(&:gets)&.chomp
       puts
       token

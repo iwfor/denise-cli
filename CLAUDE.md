@@ -6,6 +6,7 @@ A thrown together simple DNS manager for hobbyists, written in Ruby.
 
 - Cloudflare
 - DreamHost
+- AWS (Route 53)
 
 ## Structure
 
@@ -18,6 +19,7 @@ A thrown together simple DNS manager for hobbyists, written in Ruby.
 - `lib/denise/providers/base.rb` — shared provider client interface (`create_record`/`delete_record`/`list_records`)
 - `lib/denise/providers/cloudflare.rb` — Cloudflare v4 API client (Bearer token, zone-id lookup/cache)
 - `lib/denise/providers/dreamhost.rb` — DreamHost API client (key-based query auth, no zone/TTL params)
+- `lib/denise/providers/aws.rb` — AWS Route 53 client (hand-rolled SigV4 signing, REST-XML API)
 - `lib/denise/paths.rb` — config directory/file path resolution (`DENISE_CONFIG_DIR` override for tests)
 - `lib/denise/completions.rb` — bash/zsh completion script generation
 - `lib/denise/errors.rb` — typed error classes, each rescued in the CLI and printed as `denise: <message>`
@@ -28,10 +30,11 @@ A thrown together simple DNS manager for hobbyists, written in Ruby.
 
 - Ruby, managed with Bundler (`Gemfile`)
 - `thor` for the CLI
-- `faraday` for provider HTTP APIs (Cloudflare, DreamHost)
+- `faraday` for provider HTTP APIs (Cloudflare, DreamHost, AWS)
 - `tomlib` for TOML config read/write
+- `rexml` for building/parsing the AWS Route 53 client's XML request/response bodies
 - `rspec` for tests, `rubocop` for linting, `bundler-audit` for dependency vulnerability scanning
-- `base64` and `reline` are pulled in explicitly since they stopped being Ruby default gems as of 3.4/4.0
+- `base64`, `reline`, and `rexml` are pulled in explicitly since they stopped being Ruby default gems (3.4/4.0)
 
 ## Configuration
 
@@ -54,7 +57,7 @@ encrypted API token, and the zones managed through it. Sources are keyed in the 
 (`dh`, `cf`, ...). Duplicate provider types are allowed — e.g. two DreamHost accounts — as long as their
 aliases differ.
 
-- Each provider type has a default alias (`Denise::Providers::KNOWN`, e.g. `dreamhost` → `dh`).
+- Each provider type has a default alias (`Denise::Providers::KNOWN`, e.g. `dreamhost` → `dh`, `aws` → `aws`).
 - An explicit `--alias` must be unique or `add-provider` rejects it (`AliasConflictError`).
 - An omitted `--alias` uses the provider's default alias, auto-numbered (`dh`, `dh2`, `dh3`, ...) if already taken.
 - The default *source* is whichever alias was added first, unless overridden with `--default` on `add-provider`
@@ -81,7 +84,22 @@ sides. `Cloudflare::API_URL` must end in a trailing slash and request paths must
 resolves `req.url("/foo", ...)` against the connection's base URL like a browser resolves an absolute-path
 link, which discards the base path (`/client/v4`) entirely. Whenever adding a new provider client, do at least
 one live request against the real endpoint with a garbage token (an auth-format error, not a 404, confirms the
-URL is right) in addition to the stubbed specs.
+URL is right) in addition to the stubbed specs. (Every client, including AWS's, follows the same
+trailing-slash-base / no-leading-slash-path convention now.)
+
+**AWS is different from Cloudflare/DreamHost**: AWS auth is a signature over the whole request (SigV4:
+access key ID + secret access key), not a single bearer token, so `Denise::Providers::Aws#initialize` splits
+the config `token` on the first `:` into `ACCESS_KEY_ID:SECRET_ACCESS_KEY` and raises `ProviderError`
+immediately if that split doesn't produce two non-empty halves — there's no schema change to the single-token
+config model, just a documented convention for that one provider. Route 53's API is REST-XML, not JSON (see
+`rexml` in Stack), and is a global service that AWS still signs against the fixed pseudo-region `us-east-1`.
+The signer (`Aws#signed_headers`/`#signing_key`) is hand-rolled from
+[AWS's documented SigV4 algorithm](https://docs.aws.amazon.com/IAM/latest/UserGuide/create-signed-request.html)
+rather than pulling in `aws-sdk-route53` (a much heavier dependency than this project's other providers use).
+`spec/denise/providers/aws_spec.rb` verifies it by independently re-deriving the expected `Authorization`
+header from the same published algorithm (not by calling the implementation's own private helpers) and
+comparing — the crypto equivalent of the live-smoke-test principle above: don't let a test validate an
+implementation against itself.
 
 ### Provider resolution (`-p`/`--provider`)
 
@@ -126,6 +144,6 @@ dispatch, so `denise add-provider` and the `desc` help text both show the hyphen
 
 ## Roadmap / explicitly deferred
 
-- Additional providers (see README TODO): AWS Route 53, GCP Cloud DNS, HostGator, Azure DNS.
+- Additional providers (see README TODO): GCP Cloud DNS, HostGator, Azure DNS.
 - `list-entries` is local-config-only; there's no live/refresh flag to reconcile against what the provider
   actually has.

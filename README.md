@@ -8,13 +8,13 @@ Providers
 
 - Cloudflare
 - DreamHost
+- AWS Route 53 (`--token` is `ACCESS_KEY_ID:SECRET_ACCESS_KEY`, since AWS auth is a signature, not a bearer token)
 
 TODO
 ----
 
 Planned providers:
 
-- [ ] AWS Route 53
 - [ ] GCP Cloud DNS
 - [ ] HostGator
 - [ ] Azure DNS
