@@ -191,11 +191,12 @@ wouldn't appear anywhere in the help output, since it's intercepted in `bin/deni
   ambiguous-zone, and unknown-* examples in the existing specs as the bar to match).
 - **Keep `--help` and `--completions` in sync with the CLI.** Whenever a command, flag, or option changes,
   update its `desc`/`method_option`/`class_option` text so `denise help` stays accurate — that text is the
-  only documentation most users will ever see. `Completions.commands` (`lib/denise/completions.rb`) derives
-  the top-level command list from `CLI.commands.keys` automatically, so a new command shows up in
-  `--completions` for free; but it doesn't complete per-command options/flags today, so if that's ever added,
-  it becomes something to update by hand alongside the command definitions, not something to assume stays
-  in sync on its own.
+  only documentation most users will ever see. `--completions` needs no manual upkeep at all:
+  `Completions.commands`/`Completions.flags_for` (`lib/denise/completions.rb`) derive both the top-level
+  command list and each command's flags (its own `method_option`s plus the global `class_option`s) straight
+  from `CLI.commands`/`CLI.class_options`, so a new command or flag shows up in bash/zsh completion
+  automatically — nothing to touch by hand there. Only value-completion (e.g. suggesting existing zone names
+  after `-z`) would require new, hand-written logic; that's not implemented.
 - **Before every commit**, run all three and don't commit unless all three are clean:
   - `bundle exec rspec`
   - `bundle exec rubocop`
