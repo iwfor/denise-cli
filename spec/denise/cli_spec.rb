@@ -235,6 +235,22 @@ RSpec.describe Denise::CLI do
     end
   end
 
+  describe "list-providers" do
+    it "lists configured provider sources" do
+      output = capture_stdout { described_class.start(%w[list-providers]) }
+
+      expect(output).to include("dh")
+      expect(output).to include("dreamhost")
+    end
+
+    it "is also invocable as list-sources" do
+      output = capture_stdout { described_class.start(%w[list-sources]) }
+
+      expect(output).to include("dh")
+      expect(output).to include("dreamhost")
+    end
+  end
+
   describe "add-provider" do
     it "imports zones from the live API after creating the source" do
       client = instance_double(Denise::Providers::Cloudflare)

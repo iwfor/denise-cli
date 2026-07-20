@@ -107,6 +107,7 @@ module Denise
       error_exit(e)
     end
 
+    map "list-sources" => "list-providers"
     desc "list-providers", "List configured provider sources"
     def list_providers
       if @config.sources.empty?

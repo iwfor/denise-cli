@@ -247,7 +247,7 @@ type/value/ttl.
 ## Commands
 
 `config`,
-`add-provider` / `list-providers` / `remove-provider` / `set-default-provider`,
+`add-provider` / `list-providers` (aliased as `list-sources`) / `remove-provider` / `set-default-provider`,
 `add-zone` / `list-zones` / `remove-zone` / `refresh-zones`,
 `add-record` / `list-records` / `remove-record` / `search`,
 `version`, and `--completions [bash|zsh]` (defaults to `$SHELL`; handled in `bin/denise`, not a Thor command,
