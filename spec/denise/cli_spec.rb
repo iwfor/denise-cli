@@ -104,6 +104,22 @@ RSpec.describe Denise::CLI do
       expect(output).to include("1.2.3.4")
     end
 
+    it "prints no trailing padding and drops the TTL column when no record has one" do
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).and_return(client)
+      allow(client).to receive(:list_records).with(zone: "example.com")
+                                             .and_return([{ "name" => "www", "type" => "A", "value" => "1.2.3.4",
+                                                            "ttl" => nil },
+                                                          { "name" => "dkim", "type" => "TXT",
+                                                            "value" => "v=DKIM1; #{'p' * 200}", "ttl" => nil }])
+
+      output = capture_stdout { described_class.start(%w[list-records -z example.com]) }
+
+      expect(output.lines.map(&:chomp)).to all(satisfy { |line| line == line.rstrip })
+      expect(output).not_to include("TTL")
+      expect(output.lines.first.chomp).to eq("NAME  TYPE  VALUE")
+    end
+
     it "reports when there are no records" do
       client = instance_double(Denise::Providers::Dreamhost)
       allow(Denise::Providers).to receive(:client_for).and_return(client)

@@ -62,7 +62,7 @@ module Denise
       return if command
 
       say "Global flags:"
-      print_table(
+      Table.print(
         [
           ["--completions [bash|zsh]", "Print a shell completion script (defaults to $SHELL)"],
           ["-h, --help", "Show this help (same as `denise help`)"]
@@ -118,7 +118,7 @@ module Denise
       rows = @config.sources.map do |alias_name, src|
         [alias_name, src["provider"], (alias_name == @config.default_source_alias ? "*" : "")]
       end
-      print_table([%w[ALIAS PROVIDER DEFAULT], *rows])
+      Table.print([%w[ALIAS PROVIDER DEFAULT], *rows])
     end
 
     desc "remove-provider ALIAS", "Remove a provider source (alias must be given explicitly)"
@@ -161,7 +161,7 @@ module Denise
         say "No zones configured."
         return
       end
-      print_table([%w[ALIAS ZONE], *rows])
+      Table.print([%w[ALIAS ZONE], *rows])
     rescue Error => e
       error_exit(e)
     end
@@ -230,7 +230,7 @@ module Denise
         say "No records found for '#{zone}'."
         return
       end
-      print_table([%w[NAME TYPE VALUE TTL], *rows])
+      Table.print([%w[NAME TYPE VALUE TTL], *rows])
     rescue Error => e
       error_exit(e)
     end
@@ -258,7 +258,7 @@ module Denise
       rows = Search.rows(@config, query, aliases, Search.categories(options[:limit])) { |a| provider_client(a) }
       return say "No matches for '#{query}'." if rows.empty?
 
-      print_table([%w[PROVIDER ZONE MATCH NAME TYPE VALUE TTL], *rows])
+      Table.print([%w[PROVIDER ZONE MATCH NAME TYPE VALUE TTL], *rows])
     rescue Error => e
       error_exit(e)
     end

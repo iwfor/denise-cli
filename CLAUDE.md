@@ -28,6 +28,8 @@ A thrown together simple DNS manager for hobbyists, written in Ruby.
   inference below)
 - `lib/denise/record_log.rb` — appends add/remove record changes to `records.log` (see Record change log below)
 - `lib/denise/search.rb` — supports `search`: live record queries plus local zone-name matching (see Search below)
+- `lib/denise/table.rb` — renders every tabular command output (`list-*`, `search`); replaces Thor's
+  `print_table`, which pads trailing empty columns into terminal-wrapping blank lines (see Table output below)
 - `lib/denise/zone_sync.rb` — shared add-provider/refresh-zones "sync zones, report what changed" step
 - `lib/denise/errors.rb` — typed error classes, each rescued in the CLI and printed as `denise: <message>`
 - `lib/denise/version.rb` — version constant
@@ -188,6 +190,17 @@ rather than pulling in `aws-sdk-route53` (a much heavier dependency than this pr
 header from the same published algorithm (not by calling the implementation's own private helpers) and
 comparing — the crypto equivalent of the live-smoke-test principle above: don't let a test validate an
 implementation against itself.
+
+### Table output
+
+Every tabular command (`list-providers`, `list-zones`, `list-records`, `search`, and the `help` global-flags
+block) prints through `Denise::Table.print` (`lib/denise/table.rb`), not Thor's `print_table`. Thor pads every
+column but the last to a fixed width, so a row whose *trailing* cells are empty still ends in a long run of
+spaces — and DreamHost never reports a TTL, so `list-records` always had an empty last column. Padded out to
+the width of a DKIM `TXT` value (400+ characters), every row soft-wrapped in the terminal and read as a blank
+line between records. `Table` fixes both halves: it drops columns that are empty for every record (judged on
+the body rows only — a header alone isn't worth 400 columns of padding beneath it) and right-strips each line,
+so only a genuinely long *value* wraps now.
 
 ### Verbose logging (`-v`/`--verbose`)
 
