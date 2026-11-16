@@ -13,6 +13,8 @@ A thrown together simple DNS manager for hobbyists, written in Ruby.
 - `bin/denise` — CLI entry point; intercepts `--completions` before handing off to Thor
 - `lib/denise.rb` — top-level requires
 - `lib/denise/cli.rb` — Thor-based command definitions
+- `lib/denise/cli_dispatch.rb` — `CLIDispatch`, class-level Thor dispatch overrides `extend`ed into `CLI`
+  (`-h`/`--help` anywhere, hyphenated "Did you mean?" suggestions)
 - `lib/denise/config.rb` — reads/writes `config.toml`; source/zone CRUD, alias resolution (records are never
   stored here - see Provider clients below)
 - `lib/denise/crypto.rb` — key management + AES-256-GCM encrypt/decrypt for tokens
@@ -56,8 +58,12 @@ A source's token is stored as `token_encrypted`. config.toml is meant to be hand
 it by hand has no way to produce ciphertext, so `Denise::Config#encrypt_plaintext_tokens!` runs on every load:
 if a source has a plaintext `token` key, it's encrypted into `token_encrypted` and the plaintext is deleted,
 rewriting the file immediately — so a plaintext token is never left on disk past the next command invocation.
-This also doubles as the manual-rotation path: a freshly hand-edited `token` always overwrites a stale
-`token_encrypted`. `token_for` raises `MissingTokenError` if a source has neither key.
+This also doubles as a manual-rotation path: a freshly hand-edited `token` always overwrites a stale
+`token_encrypted`. The command-line rotation path is `update-token ALIAS` (`Config#update_token`), which takes
+`--token` or prompts with echo off like `add-provider`, and leaves the source's provider/zones untouched.
+Both `add_source` and `update_token` reject a blank token (`BlankTokenError`) via the shared private
+`Config#encrypt_token`. `token_for` raises `MissingTokenError` (pointing at `update-token`) if a source has
+neither key.
 
 `denise config` displays the current config as TOML with every source's `token_encrypted` stripped out
 (`Config#to_toml_without_secrets`) — safe to paste into an issue or share for debugging. If `config.toml`
@@ -233,10 +239,11 @@ actually have that zone tracked locally (`Config#zone?`) — `UnknownZoneError` 
 local check standing between a typoed `-z` and a live API call, since records themselves are never stored
 locally to catch it downstream (see Provider clients above).
 
-`remove-provider` is the one exception: it never falls back to the default and always requires the alias as an
-explicit positional argument, plus a confirmation prompt (skippable with `-y/--yes`).
+`remove-provider` and `update-token` are exceptions: they never fall back to the default and always require
+the alias as an explicit positional argument (`remove-provider` also asks for confirmation, skippable with
+`-y/--yes`).
 
-`search` is the other exception: `-p/--provider` additionally accepts the virtual alias `all`, meaning "every
+`search` is another exception: `-p/--provider` additionally accepts the virtual alias `all`, meaning "every
 configured source" (`Search.provider_aliases`), instead of resolving to a single one. Without `-p`, it
 still falls back to the default provider like everything else — `all` must be given explicitly.
 
@@ -260,7 +267,8 @@ type/value/ttl.
 ## Commands
 
 `config`,
-`add-provider` / `list-providers` (aliased as `list-sources`) / `remove-provider` / `set-default-provider`,
+`add-provider` / `list-providers` (aliased as `list-sources`) / `remove-provider` / `set-default-provider` /
+`update-token`,
 `add-zone` / `list-zones` / `remove-zone` / `refresh-zones`,
 `add-record` / `list-records` / `remove-record` / `search`,
 `version`, and `--completions [bash|zsh]` (defaults to `$SHELL`; handled in `bin/denise`, not a Thor command,
@@ -280,8 +288,8 @@ aliased to the `help` command) rather than a declared option, so Thor never list
 
 **`denise COMMAND -h`/`--help` works too**, not just `-h`/`--help` as the very first word. Thor's own
 `HELP_MAPPINGS` only checks `argv[0]`, so without help `denise add-record --help` would be parsed as a regular
-(unrecognized) option for `add-record` instead of showing its help. `CLI.dispatch` is overridden to catch
-`-h`/`--help` anywhere in a command's own args *before* Thor's normal dispatch runs, and redirects to
+(unrecognized) option for `add-record` instead of showing its help. `CLI.dispatch` is overridden (in
+`CLIDispatch`) to catch `-h`/`--help` anywhere in a command's own args *before* Thor's normal dispatch runs, and redirects to
 `help COMMAND` instead — see the method comment for the exact mechanics (it works by reconstructing the args
 Thor's own dispatch expects for invoking `help` with a command name, not by calling the command and then
 intercepting). Because of this, `-h`/`--help` are added to every command's completions in

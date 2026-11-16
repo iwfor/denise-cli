@@ -132,6 +132,33 @@ RSpec.describe Denise::Config do
     end
   end
 
+  describe "#update_token" do
+    it "replaces the token, persisted encrypted, leaving provider and zones untouched" do
+      config.add_source(provider: "dreamhost", token: "old", alias_name: "dh")
+      config.add_zone("example.com", provider_alias: "dh")
+
+      config.update_token("dh", "new-secret")
+
+      reloaded = described_class.new
+      expect(reloaded.token_for("dh")).to eq("new-secret")
+      expect(reloaded.source("dh")["provider"]).to eq("dreamhost")
+      expect(reloaded.zone?("example.com", provider_alias: "dh")).to be(true)
+      expect(File.read(Denise::Paths.config_file)).not_to include("new-secret")
+    end
+
+    it "raises for an unknown alias" do
+      expect { config.update_token("nope", "t") }.to raise_error(Denise::UnknownSourceError)
+    end
+
+    it "rejects a blank token without changing the stored one" do
+      config.add_source(provider: "dreamhost", token: "old", alias_name: "dh")
+
+      expect { config.update_token("dh", "  ") }.to raise_error(Denise::BlankTokenError)
+      expect { config.update_token("dh", nil) }.to raise_error(Denise::BlankTokenError)
+      expect(described_class.new.token_for("dh")).to eq("old")
+    end
+  end
+
   describe "#remove_source" do
     it "falls back the default to another source when the default is removed" do
       config.add_source(provider: "dreamhost", token: "t1")

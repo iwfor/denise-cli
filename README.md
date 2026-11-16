@@ -34,6 +34,10 @@ manages at the provider. Run `denise refresh-zones` any time afterward to
 pick up zones added or removed at the provider since — for a specific
 source with `-p ALIAS`, or every configured source if `-p` is omitted.
 
+Rotated a key at the provider? Run `denise update-token ALIAS` to replace
+that source's stored token (pass `--token`, or omit it to be prompted
+without echo). Its zones and other settings are kept.
+
 Only zones are tracked in `config.toml` — DNS records themselves are never
 stored locally. `list-records`, `search`, and `remove-record`'s automatic
 `--type` detection all query the provider live, so they always reflect

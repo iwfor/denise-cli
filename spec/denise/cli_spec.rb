@@ -290,6 +290,38 @@ RSpec.describe Denise::CLI do
     end
   end
 
+  describe "update-token" do
+    it "replaces the source's token from --token" do
+      output = capture_stdout { described_class.start(%w[update-token dh --token new-secret]) }
+
+      expect(output).to include("Updated token for 'dh'")
+      expect(Denise::Config.new.token_for("dh")).to eq("new-secret")
+    end
+
+    it "prompts for the token when --token is omitted" do
+      allow($stdin).to receive(:noecho).and_return("prompted-secret\n")
+
+      silence_output { described_class.start(%w[update-token dh]) }
+
+      expect(Denise::Config.new.token_for("dh")).to eq("prompted-secret")
+    end
+
+    it "fails for an unknown alias" do
+      expect do
+        silence_output { described_class.start(%w[update-token nope --token x]) }
+      end.to raise_error(SystemExit)
+    end
+
+    it "fails on a blank token and keeps the old one" do
+      allow($stdin).to receive(:noecho).and_return("\n")
+
+      expect do
+        silence_output { described_class.start(%w[update-token dh]) }
+      end.to raise_error(SystemExit)
+      expect(Denise::Config.new.token_for("dh")).to eq("t1")
+    end
+  end
+
   describe "refresh-zones" do
     it "syncs zones for -p ALIAS only" do
       client = instance_double(Denise::Providers::Dreamhost)

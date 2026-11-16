@@ -9,33 +9,7 @@ module Denise
       true
     end
 
-    # Thor's built-in -h/--help only work as the very first word (it checks
-    # HELP_MAPPINGS against argv[0] only), so `denise add-record -h` would
-    # otherwise be parsed as an unrecognized option for add-record rather than
-    # showing its help. Catch -h/--help anywhere in a command's own args and
-    # redirect to `help COMMAND` before Thor's normal dispatch ever runs.
-    def self.dispatch(meth, given_args, given_opts, config)
-      command_name = given_args.first
-      if meth.nil? && command_name && command_name !~ /\A-/ && given_args.intersect?(%w[-h --help])
-        return super(nil, ["help", command_name], given_opts, config)
-      end
-
-      super
-    end
-
-    # Thor's own "Did you mean?" suggestions are built from its internal command
-    # registry, which uses underscored method names (`list_records`), not the
-    # hyphenated form every command is actually invoked with (`list-records`).
-    # Translate the dictionary before Thor raises, so a typo like `list-source`
-    # suggests something the user can actually type.
-    # rubocop:disable Style/GlobalVars -- must match Thor's own
-    # handle_no_command_error(command, has_namespace = $thor_runner) signature exactly.
-    def self.handle_no_command_error(command, has_namespace = $thor_runner)
-      raise UndefinedCommandError.new(command,
-                                      all_commands.keys.map { |name| name.tr("_", "-") },
-                                      (namespace if has_namespace))
-    end
-    # rubocop:enable Style/GlobalVars
+    extend CLIDispatch
 
     class_option :provider, aliases: "-p", desc: "Source alias to operate on (defaults to the default provider)"
     class_option :verbose, aliases: "-v", type: :boolean, default: false,
@@ -133,6 +107,18 @@ module Denise
 
       @config.remove_source(alias_name)
       say "Removed '#{alias_name}'."
+    rescue Error => e
+      error_exit(e)
+    end
+
+    desc "update-token ALIAS", "Replace a provider source's API token (alias must be given explicitly)"
+    method_option :token,
+                  desc: "New API token, prompted securely if omitted " \
+                        "(aws: ACCESS_KEY_ID:SECRET_ACCESS_KEY)"
+    def update_token(alias_name)
+      provider = @config.source(alias_name)["provider"]
+      @config.update_token(alias_name, options[:token] || prompt_token(provider))
+      say "Updated token for '#{alias_name}'."
     rescue Error => e
       error_exit(e)
     end

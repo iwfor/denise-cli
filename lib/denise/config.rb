@@ -54,12 +54,19 @@ module Denise
 
       sources[resolved_alias] = {
         "provider" => provider,
-        "token_encrypted" => @crypto.encrypt(token),
+        "token_encrypted" => encrypt_token(token),
         "zones" => []
       }
       @data["default_source"] = resolved_alias if default || @data["default_source"].nil?
       save
       resolved_alias
+    end
+
+    # Replaces a source's API token (e.g. after rotating it at the provider),
+    # leaving its provider type and zones untouched.
+    def update_token(alias_name, token)
+      source(alias_name)["token_encrypted"] = encrypt_token(token)
+      save
     end
 
     def remove_source(alias_name)
@@ -158,6 +165,12 @@ module Denise
     end
 
     private
+
+    def encrypt_token(token)
+      raise BlankTokenError if token.to_s.strip.empty?
+
+      @crypto.encrypt(token)
+    end
 
     # Explicit aliases must not collide with an existing one.
     def claim_alias(alias_name)

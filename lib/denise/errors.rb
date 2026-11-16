@@ -72,7 +72,13 @@ module Denise
 
   class MissingTokenError < Error
     def initialize(alias_name)
-      super("source '#{alias_name}' has no token; add `token = \"...\"` under [sources.#{alias_name}] in config.toml")
+      super("source '#{alias_name}' has no token; run `denise update-token #{alias_name}`")
+    end
+  end
+
+  class BlankTokenError < Error
+    def initialize
+      super("token must not be blank")
     end
   end
 

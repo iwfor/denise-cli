@@ -16,6 +16,7 @@ require_relative "denise/record_log"
 require_relative "denise/search"
 require_relative "denise/table"
 require_relative "denise/zone_sync"
+require_relative "denise/cli_dispatch"
 require_relative "denise/cli"
 
 module Denise
