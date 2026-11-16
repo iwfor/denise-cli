@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "faraday"
+
 module Denise
   module Providers
     # Shared interface every provider client implements. Subclasses override
@@ -37,6 +39,27 @@ module Denise
 
       def build_connection
         raise NotImplementedError, "#{self.class} must implement #build_connection"
+      end
+
+      # Runs one HTTP call, turning Faraday's network-level failures (refused
+      # connection, DNS, timeout, TLS) into ProviderError, so the CLI reports
+      # `denise: ...` instead of crashing with a backtrace. The message is
+      # scrubbed of #secrets as defense in depth: DreamHost's key travels in
+      # the request URL, so an adapter error that echoed the URL would carry it.
+      def perform
+        yield
+      rescue Faraday::Error => e
+        raise ProviderError, "request to #{connection.url_prefix.host} failed: #{redact(e.message)}"
+      end
+
+      # Every secret string this client holds; subclasses that derive more
+      # than one from the token (Aws) add theirs.
+      def secrets
+        [@token]
+      end
+
+      def redact(text)
+        secrets.compact.reject(&:empty?).reduce(text) { |t, secret| t.gsub(secret, "[REDACTED]") }
       end
 
       # Only called by subclasses with method/path/params/status - never with

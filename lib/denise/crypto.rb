@@ -52,8 +52,20 @@ module Denise
     # would silently orphan every already-encrypted token in the config.
     def ensure_key!
       FileUtils.mkdir_p(File.dirname(@key_path))
-      File.binwrite(@key_path, SecureRandom.random_bytes(KEY_BYTES)) unless File.exist?(@key_path)
+      create_key! unless File.exist?(@key_path)
       File.chmod(0o600, @key_path)
+    end
+
+    # Created 0600 atomically (O_EXCL), never written with default
+    # permissions and chmod'ed afterward - that would leave a window where
+    # another local user could read the key. If another process wins the
+    # race to create it, keep theirs rather than clobbering it.
+    def create_key!
+      File.open(@key_path, File::WRONLY | File::CREAT | File::EXCL | File::BINARY, 0o600) do |f|
+        f.write(SecureRandom.random_bytes(KEY_BYTES))
+      end
+    rescue Errno::EEXIST
+      nil
     end
   end
 end

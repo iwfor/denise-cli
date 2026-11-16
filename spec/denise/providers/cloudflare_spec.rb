@@ -134,4 +134,6 @@ RSpec.describe Denise::Providers::Cloudflare do
       expect(output).to eq("")
     end
   end
+
+  it_behaves_like "a provider that wraps network errors", "super-secret-cf-token-xyz", ["super-secret-cf-token-xyz"]
 end

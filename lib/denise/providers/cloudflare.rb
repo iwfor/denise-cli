@@ -68,9 +68,11 @@ module Denise
         query = params ? "?#{params.map { |k, v| "#{k}=#{v}" }.join('&')}" : ""
         log("#{method.to_s.upcase} #{path}#{query}#{" body=#{body.to_json}" if body}")
 
-        response = connection.public_send(method) do |req|
-          req.url(path, params || {})
-          req.body = body.to_json if body
+        response = perform do
+          connection.public_send(method) do |req|
+            req.url(path, params || {})
+            req.body = body.to_json if body
+          end
         end
         log("-> HTTP #{response.status}")
         parse(response)

@@ -62,3 +62,22 @@ def write_config(toml)
   FileUtils.mkdir_p(File.dirname(Denise::Paths.config_file))
   File.write(Denise::Paths.config_file, toml)
 end
+
+# Every provider client must turn Faraday network failures into
+# ProviderError (so the CLI prints `denise: ...` instead of a backtrace),
+# with every secret scrubbed from the message - simulated here by an
+# adapter error that echoes them back, e.g. from a URL carrying the key.
+RSpec.shared_examples "a provider that wraps network errors" do |token, secrets|
+  it "raises ProviderError with secrets redacted on a network failure" do
+    failing = Faraday::Adapter::Test::Stubs.new do |stub|
+      stub.get(/.*/) { raise Faraday::ConnectionFailed, "connection refused (#{secrets.join(' ')})" }
+    end
+    conn = Faraday.new(url: described_class::API_URL) { |f| f.adapter :test, failing }
+
+    expect { described_class.new(token: token, connection: conn).list_zones }
+      .to raise_error(Denise::ProviderError) { |e|
+        expect(e.message).to include("failed: connection refused")
+        secrets.each { |secret| expect(e.message).not_to include(secret) }
+      }
+  end
+end

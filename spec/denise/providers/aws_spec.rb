@@ -274,4 +274,7 @@ RSpec.describe Denise::Providers::Aws do
       end
     end
   end
+
+  it_behaves_like "a provider that wraps network errors",
+                  "AKIDEXAMPLE:super-secret-aws-key-xyz", ["super-secret-aws-key-xyz"]
 end

@@ -15,6 +15,9 @@ module Denise
     class_option :verbose, aliases: "-v", type: :boolean, default: false,
                            desc: "Print HTTP requests/responses to providers (never includes tokens or secrets)"
 
+    TOKEN_OPTION_DESC = "API token (aws: ACCESS_KEY_ID:SECRET_ACCESS_KEY). Avoid: it's left in shell history " \
+                        "and visible in `ps`. Omit it to be prompted securely, or pipe the token on stdin"
+
     def initialize(*args)
       super
       Denise.verbose = options[:verbose]
@@ -56,9 +59,7 @@ module Denise
 
     desc "add-provider PROVIDER", "Add a new provider source (cloudflare, dreamhost, aws) and import its zones"
     method_option :alias, desc: "Alias for this source (defaults to the provider's default alias)"
-    method_option :token,
-                  desc: "API token, prompted securely if omitted " \
-                        "(aws: ACCESS_KEY_ID:SECRET_ACCESS_KEY)"
+    method_option :token, desc: TOKEN_OPTION_DESC
     method_option :default, type: :boolean, default: false, desc: "Make this the default provider"
     def add_provider(provider)
       token = options[:token] || prompt_token(provider)
@@ -112,9 +113,7 @@ module Denise
     end
 
     desc "update-token ALIAS", "Replace a provider source's API token (alias must be given explicitly)"
-    method_option :token,
-                  desc: "New API token, prompted securely if omitted " \
-                        "(aws: ACCESS_KEY_ID:SECRET_ACCESS_KEY)"
+    method_option :token, desc: TOKEN_OPTION_DESC
     def update_token(alias_name)
       provider = @config.source(alias_name)["provider"]
       @config.update_token(alias_name, options[:token] || prompt_token(provider))
@@ -292,7 +291,12 @@ module Denise
       ZoneSync.call(@config, alias_name, provider_client(alias_name)).each { |line| say line }
     end
 
+    # Gets a token without it ever appearing in argv (shell history, `ps`):
+    # a no-echo prompt on a terminal, or the first line of piped stdin
+    # (e.g. `pass show cf | denise update-token cf`) otherwise.
     def prompt_token(provider)
+      return $stdin.gets&.chomp unless $stdin.tty?
+
       label = provider == "aws" ? "AWS token (ACCESS_KEY_ID:SECRET_ACCESS_KEY)" : "API token"
       print "#{label}: "
       token = $stdin.noecho(&:gets)&.chomp

@@ -121,14 +121,20 @@ module Denise
         query = params ? "?#{params.map { |k, v| "#{k}=#{v}" }.join('&')}" : ""
         log("#{method.to_s.upcase} #{path}#{query}#{" body=#{body}" if body}")
 
-        response = connection.public_send(method) do |req|
-          req.url(path, params || {})
-          signed_headers(method, path, params: params, body: body).each { |k, v| req.headers[k] = v }
-          req.headers["Content-Type"] = "application/xml" if body
-          req.body = body if body
+        response = perform do
+          connection.public_send(method) do |req|
+            req.url(path, params || {})
+            signed_headers(method, path, params: params, body: body).each { |k, v| req.headers[k] = v }
+            req.headers["Content-Type"] = "application/xml" if body
+            req.body = body if body
+          end
         end
         log("-> HTTP #{response.status}")
         parse(response)
+      end
+
+      def secrets
+        super + [@secret_access_key]
       end
 
       def build_connection

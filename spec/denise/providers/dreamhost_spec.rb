@@ -133,4 +133,6 @@ RSpec.describe Denise::Providers::Dreamhost do
       expect(output).to eq("")
     end
   end
+
+  it_behaves_like "a provider that wraps network errors", "super-secret-dh-key-xyz", ["super-secret-dh-key-xyz"]
 end

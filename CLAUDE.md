@@ -53,6 +53,8 @@ Config lives at `~/.config/denise-cli/config.toml` (override with `DENISE_CONFIG
 A per-install encryption key is auto-created at `~/.config/denise-cli/key` with `0600` permissions on first run
 (`Denise::Crypto#ensure_key!`) and used to AES-256-GCM encrypt every provider API token before it's written to
 the TOML file. The key is never rotated automatically — rotating it would orphan already-encrypted tokens.
+It's created `0600` atomically (`File::EXCL` with a mode, in `Crypto#create_key!`), never written with default
+permissions and chmod'ed afterward, so there's no window where another local user could read it.
 
 A source's token is stored as `token_encrypted`. config.toml is meant to be hand-editable, and a person editing
 it by hand has no way to produce ciphertext, so `Denise::Config#encrypt_plaintext_tokens!` runs on every load:
@@ -60,7 +62,15 @@ if a source has a plaintext `token` key, it's encrypted into `token_encrypted` a
 rewriting the file immediately — so a plaintext token is never left on disk past the next command invocation.
 This also doubles as a manual-rotation path: a freshly hand-edited `token` always overwrites a stale
 `token_encrypted`. The command-line rotation path is `update-token ALIAS` (`Config#update_token`), which takes
-`--token` or prompts with echo off like `add-provider`, and leaves the source's provider/zones untouched.
+a token the same way `add-provider` does, and leaves the source's provider/zones untouched.
+
+**Getting a token in (`CLI#prompt_token`):** `--token` works but is discouraged in its help text, since
+argv lands in shell history and is visible to other users in `ps`. Omitting it prompts with echo off on a
+terminal, or reads the first line of stdin when stdin isn't a TTY (`pass show cf | denise update-token cf`), so
+scripts never need the token in argv. Specs exercising the prompt must stub `$stdin.tty?` — otherwise the
+piped-stdin path reads RSpec's real stdin, gets EOF, hits `exit 1`, and the uncaught `SystemExit` silently
+ends the whole suite early with "0 failures" (watch the example count).
+
 Both `add_source` and `update_token` reject a blank token (`BlankTokenError`) via the shared private
 `Config#encrypt_token`. `token_for` raises `MissingTokenError` (pointing at `update-token`) if a source has
 neither key.
@@ -137,7 +147,11 @@ values from that same call `#list_records` already uses. A domain with zero DNS 
 way, but that's a real limitation of DreamHost's current API, not a bug in ours.
 
 Every provider client subclasses `Denise::Providers::Base` and implements `create_record`/`delete_record`/
-`list_records`, raising `Denise::ProviderError` on any API/network failure. `initialize(token:, connection:
+`list_records`, raising `Denise::ProviderError` on any API/network failure. Each client's private `request`
+wraps its HTTP call in `Base#perform`, which turns any `Faraday::Error` (refused connection, DNS, timeout, TLS)
+into a `ProviderError` with every string in `#secrets` redacted from the message — `[@token]` by default, plus
+the secret access key for `Aws`. A new client must do the same (the shared example "a provider that wraps
+network errors" in `spec/spec_helper.rb` checks it). `initialize(token:, connection:
 nil)` accepts an injectable Faraday connection so specs can stub HTTP via `Faraday::Adapter::Test::Stubs`
 without touching the network — see `spec/denise/providers/*_spec.rb`.
 
@@ -317,7 +331,9 @@ picked up automatically the way other flags are).
 - New provider integrations belong under `lib/denise/providers/` as a `Denise::Providers::Base` subclass, then
   registered in `Denise::Providers::KNOWN` and `Denise::Providers.client_for`. Wire its private `request`
   method to call `#log` (see Verbose logging above) - and add a "verbose logging" spec asserting the
-  token/secret is absent from captured output, not just that a log line was produced.
+  token/secret is absent from captured output, not just that a log line was produced. Wrap the HTTP call itself
+  in `Base#perform` (see Provider clients above), override `#secrets` if the client derives more than one secret
+  from its token, and add `it_behaves_like "a provider that wraps network errors"` to its spec.
 - **7-day age gate on new Gemfile dependencies.** Before adding any gem, check its release date on
   rubygems.org (`https://rubygems.org/api/v1/versions/<gem>.json`) and pin the Gemfile to the newest version
   that is at least 7 days old as of the current date (exact pin, e.g. `gem "rubocop", "1.88.2"`, not `~>`).

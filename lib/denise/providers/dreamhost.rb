@@ -61,7 +61,7 @@ module Denise
       def request(cmd, **params)
         log("GET cmd=#{cmd}#{params.map { |k, v| " #{k}=#{v}" }.join}")
         query = { key: @token, cmd: cmd, format: "json", unique_id: SecureRandom.uuid }.merge(params)
-        response = connection.get("/", query)
+        response = perform { connection.get("/", query) }
         log("-> HTTP #{response.status}")
         parse(response)
       end

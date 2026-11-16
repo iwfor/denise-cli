@@ -298,12 +298,21 @@ RSpec.describe Denise::CLI do
       expect(Denise::Config.new.token_for("dh")).to eq("new-secret")
     end
 
-    it "prompts for the token when --token is omitted" do
-      allow($stdin).to receive(:noecho).and_return("prompted-secret\n")
+    it "prompts for the token without echo when --token is omitted on a terminal" do
+      allow($stdin).to receive_messages(tty?: true, noecho: "prompted-secret\n")
 
       silence_output { described_class.start(%w[update-token dh]) }
 
       expect(Denise::Config.new.token_for("dh")).to eq("prompted-secret")
+    end
+
+    it "reads the token from piped stdin, without prompting, when stdin isn't a terminal" do
+      allow($stdin).to receive_messages(tty?: false, gets: "piped-secret\n")
+
+      output = capture_stdout { described_class.start(%w[update-token dh]) }
+
+      expect(output).not_to include("API token:")
+      expect(Denise::Config.new.token_for("dh")).to eq("piped-secret")
     end
 
     it "fails for an unknown alias" do
@@ -313,7 +322,7 @@ RSpec.describe Denise::CLI do
     end
 
     it "fails on a blank token and keeps the old one" do
-      allow($stdin).to receive(:noecho).and_return("\n")
+      allow($stdin).to receive_messages(tty?: true, noecho: "\n")
 
       expect do
         silence_output { described_class.start(%w[update-token dh]) }

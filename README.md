@@ -35,8 +35,12 @@ pick up zones added or removed at the provider since — for a specific
 source with `-p ALIAS`, or every configured source if `-p` is omitted.
 
 Rotated a key at the provider? Run `denise update-token ALIAS` to replace
-that source's stored token (pass `--token`, or omit it to be prompted
-without echo). Its zones and other settings are kept.
+that source's stored token. Its zones and other settings are kept.
+
+For both `add-provider` and `update-token`, leave out `--token`: you'll be
+prompted without echo, or the token is read from stdin if it's piped in
+(`pass show cloudflare | denise update-token cf`). Passing `--token` works,
+but leaves the token in your shell history and visible to other users in `ps`.
 
 Only zones are tracked in `config.toml` — DNS records themselves are never
 stored locally. `list-records`, `search`, and `remove-record`'s automatic
