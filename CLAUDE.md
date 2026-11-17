@@ -17,7 +17,9 @@ A thrown together simple DNS manager for hobbyists, written in Ruby.
   (`-h`/`--help` anywhere, hyphenated "Did you mean?" suggestions)
 - `lib/denise/config.rb` — reads/writes `config.toml`; source/zone CRUD, alias resolution (records are never
   stored here - see Provider clients below)
-- `lib/denise/crypto.rb` — key management + AES-256-GCM encrypt/decrypt for tokens
+- `lib/denise/crypto.rb` — key management + AES-256-GCM encrypt/decrypt for tokens (the fallback token store)
+- `lib/denise/token_vault.rb` — OS credential-store backends for tokens: macOS Keychain (`security`) and Linux
+  Secret Service (`secret-tool`) (see Token storage below)
 - `lib/denise/providers.rb` — registry of known providers, their default aliases, and `client_for` factory
 - `lib/denise/providers/base.rb` — shared provider client interface
   (`create_record`/`delete_record`/`list_records`/`list_zones`)
@@ -35,7 +37,8 @@ A thrown together simple DNS manager for hobbyists, written in Ruby.
 - `lib/denise/zone_sync.rb` — shared add-provider/refresh-zones "sync zones, report what changed" step
 - `lib/denise/errors.rb` — typed error classes, each rescued in the CLI and printed as `denise: <message>`
 - `lib/denise/version.rb` — version constant
-- `spec/` — RSpec tests (each example runs against a fresh `Dir.mktmpdir` config dir)
+- `spec/` — RSpec tests (each example runs against a fresh `Dir.mktmpdir` config dir, with
+  `DENISE_TOKEN_STORE=file` so no spec can reach a real keychain - inject `FakeVault` instead)
 
 ## Stack
 
@@ -51,18 +54,52 @@ A thrown together simple DNS manager for hobbyists, written in Ruby.
 
 Config lives at `~/.config/denise-cli/config.toml` (override with `DENISE_CONFIG_DIR`, used by the test suite).
 A per-install encryption key is auto-created at `~/.config/denise-cli/key` with `0600` permissions on first run
-(`Denise::Crypto#ensure_key!`) and used to AES-256-GCM encrypt every provider API token before it's written to
-the TOML file. The key is never rotated automatically — rotating it would orphan already-encrypted tokens.
+(`Denise::Crypto#ensure_key!`) and used to AES-256-GCM encrypt provider API tokens into the TOML file whenever
+the OS credential store isn't usable (see Token storage below). The key is never rotated automatically —
+rotating it would orphan already-encrypted tokens.
 It's created `0600` atomically (`File::EXCL` with a mode, in `Crypto#create_key!`), never written with default
 permissions and chmod'ed afterward, so there's no window where another local user could read it.
 
-A source's token is stored as `token_encrypted`. config.toml is meant to be hand-editable, and a person editing
-it by hand has no way to produce ciphertext, so `Denise::Config#encrypt_plaintext_tokens!` runs on every load:
-if a source has a plaintext `token` key, it's encrypted into `token_encrypted` and the plaintext is deleted,
-rewriting the file immediately — so a plaintext token is never left on disk past the next command invocation.
-This also doubles as a manual-rotation path: a freshly hand-edited `token` always overwrites a stale
-`token_encrypted`. The command-line rotation path is `update-token ALIAS` (`Config#update_token`), which takes
-a token the same way `add-provider` does, and leaves the source's provider/zones untouched.
+### Token storage
+
+A source's token lives in exactly one of two places:
+
+1. **The OS credential store** (`Denise::TokenVault`), whenever one is usable — config.toml then records only
+   `token_store = "macos-keychain"` or `"secret-service"`, never the token. Entries are keyed by service
+   `denise-cli:<config dir>` (so two config dirs sharing an alias never share a token) and account = the alias.
+   - macOS: `MacKeychain` drives `security`. Storing pipes `add-generic-password -U ... -X <hex token>` into
+     `security -i`, so the token never appears in argv (`-w TOKEN` would expose it in `ps`), and hex sidesteps
+     quoting it. The service/account *are* double-quoted in that command line, so names containing `"`, `\`,
+     or a newline are refused (`VaultError` → fallback). Exit 44 means "not found" for find/delete.
+   - Linux: `SecretService` drives `secret-tool` (GNOME Keyring/KWallet/KeePassXC over D-Bus); the token goes
+     on `secret-tool store`'s stdin. `secret-tool` exits 1 *both* for "no such item" (silently) and for "no
+     D-Bus session" (with stderr), so availability is a probe lookup that must exit 0, or 1 with empty stderr.
+   - `TokenVault.detect` picks the backend from `RbConfig::CONFIG["host_os"]` and returns nil if it isn't
+     usable; `DENISE_TOKEN_STORE=file` forces nil. Every command goes through `TokenVault::Runner` (5s
+     timeout, so a keyring blocked on an unlock prompt can't hang denise), and `VaultError` messages are built
+     from the tool's stderr only — never stdout/stdin, which can carry the token.
+   - Windows has no backend yet: no built-in CLI can read a Credential Manager secret back, so it would need
+     `Fiddle` calls to `CredReadW`/`CredWriteW` in advapi32 - deferred.
+2. **Encrypted in config.toml** as `token_encrypted` (`Denise::Crypto`) — the fallback.
+
+`Config#vault` detects lazily, on first use, so commands that never touch a token never spawn
+`security`/`secret-tool`. `Config#store_token` (add-provider/update-token) tries the vault first and falls
+back to encrypting with a warning. `Config#move_to_vault` stores, **reads the token back and compares**, and
+only then drops `token_encrypted` — a token is never removed from config.toml unless it's verifiably
+retrievable from the vault. `remove-provider` deletes the vault entry too (warning, not failing, if the vault
+isn't reachable). `token_for` raises `TokenStoreUnavailableError` when `token_store` names a store that isn't
+usable here (e.g. SSH with a locked keyring, or a config.toml copied to another machine/OS) — the fix there
+is `update-token`, since a vault-backed config.toml deliberately doesn't carry its tokens with it.
+
+`Config#migrate_tokens!` runs on every load. config.toml is meant to be hand-editable, and a person editing it
+by hand has no way to produce ciphertext or a keychain entry, so a plaintext `token` key is stored immediately
+(vault, else encrypted) and deleted, rewriting the file — a plaintext token is never left on disk past the
+next command invocation. It always overwrites whatever was stored before, which doubles as a manual-rotation
+path. An existing `token_encrypted` is moved into the vault as soon as one is usable (printing
+`moved the token for 'X' into the ...` once). That move is retried on every load until it succeeds, so its
+failure is silent unless `-v` — an installed-but-locked keyring would otherwise warn on every command. The
+command-line rotation path is `update-token ALIAS` (`Config#update_token`), which takes a token the same way
+`add-provider` does, and leaves the source's provider/zones untouched.
 
 **Getting a token in (`CLI#prompt_token`):** `--token` works but is discouraged in its help text, since
 argv lands in shell history and is visible to other users in `ps`. Omitting it prompts with echo off on a
@@ -72,11 +109,11 @@ piped-stdin path reads RSpec's real stdin, gets EOF, hits `exit 1`, and the unca
 ends the whole suite early with "0 failures" (watch the example count).
 
 Both `add_source` and `update_token` reject a blank token (`BlankTokenError`) via the shared private
-`Config#encrypt_token`. `token_for` raises `MissingTokenError` (pointing at `update-token`) if a source has
-neither key.
+`Config#check_token!`. `token_for` raises `MissingTokenError` (pointing at `update-token`) if a source has
+neither `token_encrypted` nor `token_store`, or its vault has no entry for it.
 
 `denise config` displays the current config as TOML with every source's `token_encrypted` stripped out
-(`Config#to_toml_without_secrets`) — safe to paste into an issue or share for debugging. If `config.toml`
+(`Config#to_toml_without_secrets`; `token_store` is kept, since it only says where the token lives) — safe to paste into an issue or share for debugging. If `config.toml`
 doesn't exist yet, `Config#ensure_file!` creates a skeleton (a one-line comment plus an empty `[sources]`
 table) before displaying it, so this command also doubles as "give me a config.toml to hand-edit."
 

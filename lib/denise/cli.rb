@@ -70,7 +70,7 @@ module Denise
         default: options[:default]
       )
       default_note = @config.default_source_alias == alias_name ? " (default)" : ""
-      say "Added #{provider} as '#{alias_name}'#{default_note}."
+      say "Added #{provider} as '#{alias_name}'#{default_note}; token stored in #{@config.token_location(alias_name)}."
 
       begin
         sync_zones_for(alias_name)
@@ -117,7 +117,7 @@ module Denise
     def update_token(alias_name)
       provider = @config.source(alias_name)["provider"]
       @config.update_token(alias_name, options[:token] || prompt_token(provider))
-      say "Updated token for '#{alias_name}'."
+      say "Updated token for '#{alias_name}', stored in #{@config.token_location(alias_name)}."
     rescue Error => e
       error_exit(e)
     end

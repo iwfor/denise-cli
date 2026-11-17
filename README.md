@@ -23,11 +23,20 @@ Configuration
 -------------
 
 Configuration lives in `~/.config/denise-cli/config.toml`. API tokens are
-encrypted at rest using a key auto-generated at `~/.config/denise-cli/key`
-(created with `0600` permissions on first run). Manage configuration entirely
-from the command line — see `denise help` for available commands. Run
-`denise config` to view the current configuration (secrets omitted); it
-creates a skeleton file first if one doesn't exist yet.
+kept in your OS credential store when one is available: the macOS Keychain,
+or on Linux a Secret Service keyring (GNOME Keyring, KWallet, KeePassXC) via
+`secret-tool` (Debian/Ubuntu package `libsecret-tools`). Otherwise - e.g. on
+Windows, or over SSH with no unlocked keyring - they're encrypted into
+`config.toml` using a key auto-generated at `~/.config/denise-cli/key`
+(created with `0600` permissions on first run). Tokens already encrypted in
+`config.toml` are moved into the credential store automatically once it's
+available. Because of this, a `config.toml` copied to another machine doesn't
+bring its tokens along - run `denise update-token ALIAS` there. Set
+`DENISE_TOKEN_STORE=file` to always use the encrypted file.
+
+Manage configuration entirely from the command line — see `denise help` for
+available commands. Run `denise config` to view the current configuration
+(secrets omitted); it creates a skeleton file first if one doesn't exist yet.
 
 `denise add-provider` automatically imports the zones that key/account
 manages at the provider. Run `denise refresh-zones` any time afterward to

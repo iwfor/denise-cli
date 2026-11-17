@@ -76,6 +76,16 @@ module Denise
     end
   end
 
+  class TokenStoreUnavailableError < Error
+    def initialize(alias_name, store)
+      super("source '#{alias_name}' keeps its token in the #{TokenVault.label_for(store)}, which isn't available " \
+            "here; unlock it, or run `denise update-token #{alias_name}` to store a token for this machine")
+    end
+  end
+
+  # Raised by Denise::TokenVault backends when a credential-store command fails.
+  class VaultError < Error; end
+
   class BlankTokenError < Error
     def initialize
       super("token must not be blank")

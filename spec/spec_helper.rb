@@ -12,9 +12,13 @@ RSpec.configure do |config|
   config.around do |example|
     Dir.mktmpdir("denise-spec") do |dir|
       ENV["DENISE_CONFIG_DIR"] = dir
+      # Never let a spec reach the real macOS Keychain/Secret Service: specs
+      # that exercise one inject a fake (FakeVault) or a fake command runner.
+      ENV["DENISE_TOKEN_STORE"] = "file"
       example.run
     end
     ENV.delete("DENISE_CONFIG_DIR")
+    ENV.delete("DENISE_TOKEN_STORE")
   end
 
   config.after { Denise.verbose = false }
@@ -79,5 +83,36 @@ RSpec.shared_examples "a provider that wraps network errors" do |token, secrets|
         expect(e.message).to include("failed: connection refused")
         secrets.each { |secret| expect(e.message).not_to include(secret) }
       }
+  end
+end
+
+# In-memory stand-in for a Denise::TokenVault backend, injected via
+# Config.new(vault:) so specs never touch a real keychain. `fail_store`
+# makes every store raise; `mangle` makes reads return a different token
+# than was stored (to exercise read-back verification).
+class FakeVault
+  attr_reader :items, :name
+
+  def initialize(name: "macos-keychain", fail_store: false, mangle: false)
+    @name = name
+    @fail_store = fail_store
+    @mangle = mangle
+    @items = {}
+  end
+
+  def label = "Fake Keychain"
+
+  def store(account, secret)
+    raise Denise::VaultError, "Fake Keychain store failed" if @fail_store
+
+    @items[account] = secret
+  end
+
+  def fetch(account)
+    @items[account]&.then { |s| @mangle ? "#{s}-mangled" : s }
+  end
+
+  def delete(account)
+    @items.delete(account)
   end
 end

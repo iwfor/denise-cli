@@ -55,6 +55,144 @@ RSpec.describe Denise::Config do
     end
   end
 
+  describe "OS credential store (vault)" do
+    let(:vault) { FakeVault.new }
+    let(:vaulted) { described_class.new(vault: vault) }
+    let(:file_contents) { File.read(Denise::Paths.config_file) }
+
+    it "stores a new source's token in the vault, not config.toml" do
+      vaulted.add_source(provider: "dreamhost", token: "secret-tok", alias_name: "dh")
+
+      expect(vault.items).to eq("dh" => "secret-tok")
+      expect(file_contents).not_to include("token_encrypted")
+      expect(file_contents).to include('token_store = "macos-keychain"')
+      expect(described_class.new(vault: vault).token_for("dh")).to eq("secret-tok")
+      expect(vaulted.token_location("dh")).to eq("the macOS Keychain")
+    end
+
+    it "overwrites the vault entry on update_token" do
+      vaulted.add_source(provider: "dreamhost", token: "old", alias_name: "dh")
+
+      vaulted.update_token("dh", "new")
+
+      expect(vault.items["dh"]).to eq("new")
+    end
+
+    it "falls back to encrypting into config.toml, with a warning, when the vault store fails" do
+      failing = described_class.new(vault: FakeVault.new(fail_store: true))
+
+      stderr = capture_stderr { failing.add_source(provider: "dreamhost", token: "tok", alias_name: "dh") }
+
+      expect(stderr).to include("Fake Keychain store failed; keeping the token for 'dh' encrypted in config.toml")
+      expect(file_contents).to include("token_encrypted")
+      expect(file_contents).not_to include("token_store")
+      expect(failing.token_for("dh")).to eq("tok")
+    end
+
+    it "never drops the config.toml copy unless the vault reads back the same token" do
+      config.add_source(provider: "dreamhost", token: "tok", alias_name: "dh")
+
+      capture_stderr { described_class.new(vault: FakeVault.new(mangle: true)) }
+
+      expect(file_contents).to include("token_encrypted")
+      expect(described_class.new.token_for("dh")).to eq("tok")
+    end
+
+    describe "migration on load" do
+      before { config.add_source(provider: "dreamhost", token: "tok", alias_name: "dh") }
+
+      it "moves an existing token_encrypted into the vault and removes it from config.toml" do
+        stderr = capture_stderr { described_class.new(vault: vault) }
+
+        expect(stderr).to include("moved the token for 'dh' into the Fake Keychain")
+        expect(vault.items["dh"]).to eq("tok")
+        expect(file_contents).not_to include("token_encrypted")
+        expect(described_class.new(vault: vault).token_for("dh")).to eq("tok")
+      end
+
+      it "leaves the token encrypted and stays quiet when the vault fails (warning only with -v)" do
+        failing = FakeVault.new(fail_store: true)
+
+        expect(capture_stderr { described_class.new(vault: failing) }).to eq("")
+        expect(file_contents).to include("token_encrypted")
+
+        Denise.verbose = true
+        expect(capture_stderr { described_class.new(vault: failing) }).to include("Fake Keychain store failed")
+      end
+
+      it "doesn't crash loading a token_encrypted that can't be decrypted" do
+        write_config(file_contents.sub(/token_encrypted = ".*"/, 'token_encrypted = "garbage"'))
+
+        stderr = capture_stderr { described_class.new(vault: vault) }
+
+        expect(stderr).to include("couldn't decrypt the token for 'dh'")
+        expect(vault.items).to be_empty
+      end
+    end
+
+    it "sends a hand-edited plaintext token straight to the vault, replacing what was there" do
+      vaulted.add_source(provider: "dreamhost", token: "old", alias_name: "dh")
+      write_config(file_contents.sub('token_store = "macos-keychain"',
+                                     "token = \"hand-typed\"\ntoken_store = \"macos-keychain\""))
+
+      described_class.new(vault: vault)
+
+      expect(vault.items["dh"]).to eq("hand-typed")
+      expect(file_contents).not_to include("hand-typed")
+      expect(file_contents).not_to include("token_encrypted")
+    end
+
+    it "deletes the vault entry when the source is removed" do
+      vaulted.add_source(provider: "dreamhost", token: "tok", alias_name: "dh")
+
+      vaulted.remove_source("dh")
+
+      expect(vault.items).to be_empty
+    end
+
+    it "still removes the source, with a warning, when its vault isn't available" do
+      vaulted.add_source(provider: "dreamhost", token: "tok", alias_name: "dh")
+      no_vault = described_class.new(vault: nil)
+
+      stderr = capture_stderr { no_vault.remove_source("dh") }
+
+      expect(stderr).to include("macOS Keychain isn't available; the token for 'dh' was left in it")
+      expect(described_class.new(vault: nil).sources).not_to have_key("dh")
+    end
+
+    it "raises TokenStoreUnavailableError when the source's vault isn't usable here" do
+      vaulted.add_source(provider: "dreamhost", token: "tok", alias_name: "dh")
+
+      expect { described_class.new(vault: nil).token_for("dh") }
+        .to raise_error(Denise::TokenStoreUnavailableError, /macOS Keychain/)
+      expect { described_class.new(vault: FakeVault.new(name: "secret-service")).token_for("dh") }
+        .to raise_error(Denise::TokenStoreUnavailableError)
+    end
+
+    it "raises MissingTokenError when the vault has no entry for the source" do
+      vaulted.add_source(provider: "dreamhost", token: "tok", alias_name: "dh")
+      vault.items.clear
+
+      expect { vaulted.token_for("dh") }.to raise_error(Denise::MissingTokenError, /update-token dh/)
+    end
+
+    it "never probes for a vault when nothing needs one" do
+      vaulted.add_source(provider: "dreamhost", token: "tok", alias_name: "dh")
+      expect(Denise::TokenVault).not_to receive(:detect)
+
+      described_class.new.list_zones
+    end
+
+    it "shows token_store (but never the token) in to_toml_without_secrets" do
+      vaulted.add_source(provider: "dreamhost", token: "secret-tok", alias_name: "dh")
+
+      toml = vaulted.to_toml_without_secrets
+
+      expect(toml).to include('token_store = "macos-keychain"')
+      expect(toml).not_to include("secret-tok")
+    end
+  end
+
   describe "plaintext token migration" do
     it "encrypts a hand-written token on load and rewrites it as token_encrypted" do
       write_config(<<~TOML)

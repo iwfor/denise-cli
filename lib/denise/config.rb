@@ -5,8 +5,11 @@ require "fileutils"
 
 module Denise
   # Reads and writes ~/.config/denise-cli/config.toml: sources (provider
-  # instances, each with a unique alias and an encrypted API token) and the
-  # zones under each source. Records are never stored here - add-record/
+  # instances, each with a unique alias and an API token) and the zones
+  # under each source. A token lives in the OS credential store
+  # (Denise::TokenVault, named by the source's `token_store`) whenever one is
+  # usable, else encrypted into `token_encrypted` (Denise::Crypto) as a
+  # fallback. Records are never stored here - add-record/
   # remove-record/list-records/search all query the live provider API
   # instead (see Denise::CLI, Denise::Search).
   class Config
@@ -18,11 +21,14 @@ module Denise
 
     attr_reader :path
 
-    def initialize(path: Paths.config_file, crypto: Crypto.new)
+    # `vault:` is a Denise::TokenVault backend, nil for none, or :detect to
+    # find this platform's lazily (see #vault).
+    def initialize(path: Paths.config_file, crypto: Crypto.new, vault: :detect)
       @path = path
       @crypto = crypto
+      @vault = vault unless vault == :detect
       @data = load
-      encrypt_plaintext_tokens!
+      migrate_tokens!
       migrate_legacy_zones!
     end
 
@@ -41,22 +47,29 @@ module Denise
     end
 
     def token_for(alias_name)
-      encrypted = source(alias_name)["token_encrypted"]
-      raise MissingTokenError, alias_name unless encrypted
+      src = source(alias_name)
+      return @crypto.decrypt(src["token_encrypted"]) if src["token_encrypted"]
 
-      @crypto.decrypt(encrypted)
+      store = src["token_store"] or raise MissingTokenError, alias_name
+      raise TokenStoreUnavailableError.new(alias_name, store) unless vault&.name == store
+
+      vault.fetch(alias_name) || raise(MissingTokenError, alias_name)
+    end
+
+    # Where a source's token is kept, for display.
+    def token_location(alias_name)
+      store = source(alias_name)["token_store"]
+      store ? "the #{TokenVault.label_for(store)}" : "config.toml (encrypted)"
     end
 
     def add_source(provider:, token:, alias_name: nil, default: false)
       raise UnknownProviderError, provider unless Providers.known?(provider)
 
+      check_token!(token)
       resolved_alias = alias_name ? claim_alias(alias_name) : auto_alias(provider)
 
-      sources[resolved_alias] = {
-        "provider" => provider,
-        "token_encrypted" => encrypt_token(token),
-        "zones" => []
-      }
+      sources[resolved_alias] = { "provider" => provider, "zones" => [] }
+      store_token(resolved_alias, token)
       @data["default_source"] = resolved_alias if default || @data["default_source"].nil?
       save
       resolved_alias
@@ -65,16 +78,27 @@ module Denise
     # Replaces a source's API token (e.g. after rotating it at the provider),
     # leaving its provider type and zones untouched.
     def update_token(alias_name, token)
-      source(alias_name)["token_encrypted"] = encrypt_token(token)
+      source(alias_name)
+      check_token!(token)
+      store_token(alias_name, token)
       save
     end
 
     def remove_source(alias_name)
       raise UnknownSourceError, alias_name unless sources.key?(alias_name)
 
-      sources.delete(alias_name)
+      forget_vault_token(alias_name, sources.delete(alias_name)["token_store"])
       @data["default_source"] = sources.keys.first if @data["default_source"] == alias_name
       save
+    end
+
+    # The OS credential store (a Denise::TokenVault backend, or nil if none
+    # is usable), detected on first use rather than at load - so commands
+    # that never touch a token never spawn `security`/`secret-tool`.
+    def vault
+      return @vault if defined?(@vault)
+
+      @vault = TokenVault.detect(config_dir: File.dirname(@path))
     end
 
     def set_default_source(alias_name)
@@ -166,10 +190,47 @@ module Denise
 
     private
 
-    def encrypt_token(token)
+    def check_token!(token)
       raise BlankTokenError if token.to_s.strip.empty?
+    end
 
-      @crypto.encrypt(token)
+    # Puts a source's token in the OS credential store if one is usable,
+    # else encrypts it into config.toml. Doesn't save; callers do.
+    def store_token(alias_name, token)
+      src = source(alias_name)
+      return if vault && move_to_vault(alias_name, token)
+
+      src["token_encrypted"] = @crypto.encrypt(token)
+      src.delete("token_store")
+    end
+
+    # Stores the token in the vault and reads it back before dropping
+    # `token_encrypted`, so a token is never removed from config.toml unless
+    # it's verifiably retrievable from the vault. Returns whether it moved;
+    # on failure the source is left exactly as it was. `quiet:` is for the
+    # opportunistic retry on every load (see #migrate_token) - a keyring
+    # that's installed but locked (SSH, headless) would otherwise warn on
+    # every single command.
+    def move_to_vault(alias_name, token, quiet: false)
+      vault.store(alias_name, token)
+      raise VaultError, "#{vault.label} returned a different token than was stored" if vault.fetch(alias_name) != token
+
+      src = source(alias_name)
+      src.delete("token_encrypted")
+      src["token_store"] = vault.name
+      true
+    rescue VaultError => e
+      warn "denise: #{e.message}; keeping the token for '#{alias_name}' encrypted in config.toml" unless quiet
+      false
+    end
+
+    def forget_vault_token(alias_name, store)
+      return unless store
+      return vault.delete(alias_name) if vault&.name == store
+
+      warn "denise: #{TokenVault.label_for(store)} isn't available; the token for '#{alias_name}' was left in it"
+    rescue VaultError => e
+      warn "denise: #{e.message}; the token for '#{alias_name}' may have been left in the #{vault.label}"
     end
 
     # Explicit aliases must not collide with an existing one.
@@ -190,20 +251,32 @@ module Denise
       "#{base}#{n}"
     end
 
-    # A hand-edited config.toml may set a plaintext `token` (the user has no
-    # way to produce the encrypted form themselves). Encrypt it into
-    # `token_encrypted` and drop the plaintext, so it's never written back
-    # to disk unencrypted. Also covers manual token rotation: a freshly
-    # hand-edited `token` always wins over a stale `token_encrypted`.
-    def encrypt_plaintext_tokens!
-      migrated = false
-      sources.each_value do |src|
-        next unless src.key?("token")
+    # Runs on every load, rewriting config.toml immediately if anything
+    # changed. A hand-edited plaintext `token` (the user has no way to
+    # produce ciphertext or a keychain entry themselves) is stored right away
+    # and dropped, so it's never written back to disk in plaintext - and
+    # always wins over whatever was stored before, which doubles as manual
+    # rotation. An existing `token_encrypted` is moved into the OS credential
+    # store as soon as one is usable.
+    def migrate_tokens!
+      save if sources.keys.map { |alias_name| migrate_token(alias_name) }.any?
+    end
 
-        src["token_encrypted"] = @crypto.encrypt(src.delete("token"))
-        migrated = true
+    def migrate_token(alias_name)
+      src = source(alias_name)
+      if src.key?("token")
+        store_token(alias_name, src.delete("token"))
+        true
+      elsif src["token_encrypted"] && vault
+        moved = move_to_vault(alias_name, @crypto.decrypt(src["token_encrypted"]), quiet: !Denise.verbose)
+        warn "denise: moved the token for '#{alias_name}' into the #{vault.label}" if moved
+        moved
+      else
+        false
       end
-      save if migrated
+    rescue OpenSSL::Cipher::CipherError, ArgumentError
+      warn "denise: couldn't decrypt the token for '#{alias_name}'; run `denise update-token #{alias_name}`"
+      false
     end
 
     # Older denise versions stored each zone as a {"name" => ..., "records"
