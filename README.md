@@ -56,8 +56,25 @@ stored locally. `list-records`, `search`, and `remove-record`'s automatic
 `--type` detection all query the provider live, so they always reflect
 what's actually there (at the cost of an API call).
 
-Every `add-record`/`remove-record` is logged as one JSON line (timestamp,
-provider, alias, action, and the record) to `~/.config/denise-cli/records.log`.
+To change a record, use `update-record` (Cloudflare only): it edits the
+record in place, so the name never drops out of DNS and settings you don't
+pass (TTL, proxy) stay as they were. Remove + add would leave a gap, and on
+Cloudflare a CNAME can't even be added while the old one exists.
+
+```
+denise update-record www.example.com -z example.com -p cf --value target.example.net
+```
+
+`--old-value` picks one record when a name has several of the same type;
+without it denise refuses rather than guessing. On Cloudflare, `add-record`
+and `update-record` take `--proxied` / `--no-proxied` (orange cloud on or
+off; new records default to DNS only), and `list-records` shows a PROXIED
+column. Cloudflare record names are full names (`www.example.com`), as
+`list-records` prints them.
+
+Every `add-record`/`update-record`/`remove-record` is logged as one JSON line
+(timestamp, provider, alias, action, and the record; updates also carry
+`old_value`) to `~/.config/denise-cli/records.log`.
 It's capped at `log_max_records` entries (default 10000, hand-editable in
 `config.toml`) — past the cap, the oldest entry is shifted out rather than
 rotating the whole file.

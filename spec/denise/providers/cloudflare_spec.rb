@@ -45,10 +45,11 @@ RSpec.describe Denise::Providers::Cloudflare do
   end
 
   describe "#delete_record" do
-    it "finds the record by name/type then deletes it by id" do
+    it "finds the record by full name/type then deletes it by id" do
       stubs.get("/client/v4/zones") { [200, {}, { success: true, result: [{ "id" => "zone123" }] }.to_json] }
       stubs.get("/client/v4/zones/zone123/dns_records") do |env|
-        expect(env.params["name"]).to eq("www")
+        # Cloudflare's name filter only matches full names.
+        expect(env.params["name"]).to eq("www.example.com")
         expect(env.params["type"]).to eq("A")
         [200, {}, { success: true, result: [{ "id" => "rec1", "name" => "www", "type" => "A" }] }.to_json]
       end
@@ -67,19 +68,115 @@ RSpec.describe Denise::Providers::Cloudflare do
         provider.delete_record(zone: "example.com", name: "missing", type: "A")
       end.to raise_error(Denise::ProviderError, /no A record named 'missing'/)
     end
+
+    it "refuses to pick one when several records share the name and type" do
+      stubs.get("/client/v4/zones") { [200, {}, { success: true, result: [{ "id" => "zone123" }] }.to_json] }
+      stubs.get("/client/v4/zones/zone123/dns_records") do
+        [200, {}, { success: true, result: [{ "id" => "r1", "content" => "1.1.1.1" },
+                                            { "id" => "r2", "content" => "2.2.2.2" }] }.to_json]
+      end
+
+      expect do
+        provider.delete_record(zone: "example.com", name: "www", type: "A")
+      end.to raise_error(Denise::AmbiguousRecordError, /2 A records \(1\.1\.1\.1, 2\.2\.2\.2\)/)
+    end
+  end
+
+  describe "#create_record with proxied" do
+    it "sends proxied only when given" do
+      stubs.get("/client/v4/zones") { [200, {}, { success: true, result: [{ "id" => "zone123" }] }.to_json] }
+      stubs.post("/client/v4/zones/zone123/dns_records") do |env|
+        expect(JSON.parse(env.body)).to eq("type" => "CNAME", "name" => "www", "content" => "t.example.net",
+                                           "proxied" => true)
+        [200, {}, { success: true, result: { "id" => "rec1" } }.to_json]
+      end
+
+      provider.create_record(zone: "example.com", name: "www", type: "CNAME", value: "t.example.net", proxied: true)
+    end
+  end
+
+  describe "#update_record" do
+    let(:www) { { "id" => "rec1", "name" => "www.example.com", "type" => "CNAME", "content" => "old.example.net" } }
+
+    before do
+      stubs.get("/client/v4/zones") { [200, {}, { success: true, result: [{ "id" => "zone123" }] }.to_json] }
+    end
+
+    it "patches only the content, so the record keeps proxied and ttl, and returns the new record" do
+      stubs.get("/client/v4/zones/zone123/dns_records") do |env|
+        expect(env.params["name"]).to eq("www.example.com")
+        [200, {}, { success: true, result: [www] }.to_json]
+      end
+      stubs.patch("/client/v4/zones/zone123/dns_records/rec1") do |env|
+        expect(JSON.parse(env.body)).to eq("content" => "new.example.net")
+        [200, {}, { success: true, result: www.merge("content" => "new.example.net", "ttl" => 1,
+                                                     "proxied" => true) }.to_json]
+      end
+
+      expect(provider.update_record(zone: "example.com", name: "www", type: "CNAME", value: "new.example.net"))
+        .to eq("name" => "www.example.com", "type" => "CNAME", "value" => "new.example.net", "ttl" => 1,
+               "proxied" => true)
+    end
+
+    it "sends ttl and proxied when given" do
+      stubs.get("/client/v4/zones/zone123/dns_records") { [200, {}, { success: true, result: [www] }.to_json] }
+      stubs.patch("/client/v4/zones/zone123/dns_records/rec1") do |env|
+        expect(JSON.parse(env.body)).to eq("content" => "new.example.net", "ttl" => 300, "proxied" => false)
+        [200, {}, { success: true, result: www }.to_json]
+      end
+
+      provider.update_record(zone: "example.com", name: "www.example.com", type: "CNAME",
+                             value: "new.example.net", ttl: 300, proxied: false)
+    end
+
+    it "picks the record whose content is old_value when the name has several" do
+      stubs.get("/client/v4/zones/zone123/dns_records") do
+        [200, {}, { success: true, result: [{ "id" => "r1", "content" => "1.1.1.1" },
+                                            { "id" => "r2", "content" => "2.2.2.2" }] }.to_json]
+      end
+      stubs.patch("/client/v4/zones/zone123/dns_records/r2") do
+        [200, {}, { success: true, result: { "id" => "r2", "content" => "3.3.3.3" } }.to_json]
+      end
+
+      provider.update_record(zone: "example.com", name: "www", type: "A", value: "3.3.3.3", old_value: "2.2.2.2")
+    end
+
+    it "refuses when several records match and no old_value picks one" do
+      stubs.get("/client/v4/zones/zone123/dns_records") do
+        [200, {}, { success: true, result: [{ "id" => "r1", "content" => "1.1.1.1" },
+                                            { "id" => "r2", "content" => "2.2.2.2" }] }.to_json]
+      end
+
+      expect do
+        provider.update_record(zone: "example.com", name: "www", type: "A", value: "3.3.3.3")
+      end.to raise_error(Denise::AmbiguousRecordError, /--old-value/)
+    end
   end
 
   describe "#list_records" do
-    it "returns normalized records for the zone" do
+    it "returns normalized records for the zone, including proxied" do
       stubs.get("/client/v4/zones") { [200, {}, { success: true, result: [{ "id" => "zone123" }] }.to_json] }
       stubs.get("/client/v4/zones/zone123/dns_records") do
-        body = { success: true, result: [{ "name" => "www", "type" => "A", "content" => "1.2.3.4", "ttl" => 300 }] }
+        body = { success: true, result: [{ "name" => "www", "type" => "A", "content" => "1.2.3.4", "ttl" => 300,
+                                           "proxied" => true }] }
         [200, {}, body.to_json]
       end
 
       expect(provider.list_records(zone: "example.com")).to eq(
-        [{ "name" => "www", "type" => "A", "value" => "1.2.3.4", "ttl" => 300 }]
+        [{ "name" => "www", "type" => "A", "value" => "1.2.3.4", "ttl" => 300, "proxied" => true }]
       )
+    end
+
+    it "follows pagination past Cloudflare's 100-record page" do
+      stubs.get("/client/v4/zones") { [200, {}, { success: true, result: [{ "id" => "zone123" }] }.to_json] }
+      stubs.get("/client/v4/zones/zone123/dns_records") do |env|
+        expect(env.params["per_page"]).to eq("100")
+        name = env.params["page"] == "1" ? "a" : "b"
+        [200, {}, { success: true, result: [{ "name" => name, "type" => "A", "content" => "1.2.3.4" }],
+                    result_info: { total_pages: 2 } }.to_json]
+      end
+
+      expect(provider.list_records(zone: "example.com").map { |r| r["name"] }).to eq(%w[a b])
     end
   end
 

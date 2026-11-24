@@ -12,44 +12,82 @@ module Denise
       # one gets its last segment (v4) clobbered instead of extended.
       API_URL = "https://api.cloudflare.com/client/v4/"
 
-      def create_record(zone:, name:, type:, value:, ttl: nil)
+      # proxied: nil leaves it to Cloudflare, which makes new records DNS-only.
+      def create_record(zone:, name:, type:, value:, ttl: nil, proxied: nil)
         body = { type: type, name: name, content: value }
         body[:ttl] = ttl if ttl
+        body[:proxied] = proxied unless proxied.nil?
         request(:post, "zones/#{zone_id(zone)}/dns_records", body: body)
       end
 
       def delete_record(zone:, name:, type:)
         record = find_record(zone, name: name, type: type)
-        raise ProviderError, "no #{type} record named '#{name}' found in zone '#{zone}'" unless record
-
         request(:delete, "zones/#{zone_id(zone)}/dns_records/#{record['id']}")
       end
 
+      # PATCH sends only what changes, so the record keeps its other fields
+      # (proxied, ttl, comment) - unlike delete + create, which would drop the
+      # name from DNS in between and come back DNS-only.
+      # changes: ttl:, proxied: - nil (or absent) means unchanged.
+      def update_record(zone:, name:, type:, value:, old_value: nil, **changes)
+        record = find_record(zone, name: name, type: type, value: old_value)
+        body = { content: value }.merge(changes.slice(:ttl, :proxied).compact)
+        normalize(request(:patch, "zones/#{zone_id(zone)}/dns_records/#{record['id']}", body: body).fetch("result"))
+      end
+
       def list_records(zone:)
-        request(:get, "zones/#{zone_id(zone)}/dns_records").fetch("result").map do |r|
-          { "name" => r["name"], "type" => r["type"], "value" => r["content"], "ttl" => r["ttl"] }
-        end
+        paginate("zones/#{zone_id(zone)}/dns_records", per_page: 100).map { |r| normalize(r) }
       end
 
       def list_zones
-        zones = []
-        page = 1
-        loop do
-          data = request(:get, "zones", params: { page: page, per_page: 50 })
-          zones.concat(data.fetch("result").map { |z| z["name"] })
-          total_pages = data.dig("result_info", "total_pages") || 1
-          break if page >= total_pages
+        paginate("zones", per_page: 50).map { |z| z["name"] }
+      end
 
-          page += 1
-        end
-        zones
+      def supports_proxied?
+        true
       end
 
       private
 
-      def find_record(zone, name:, type:)
-        result = request(:get, "zones/#{zone_id(zone)}/dns_records", params: { name: name, type: type })
-        result.fetch("result").first
+      def normalize(record)
+        { "name" => record["name"], "type" => record["type"], "value" => record["content"],
+          "ttl" => record["ttl"], "proxied" => record["proxied"] }
+      end
+
+      # Every page of a list endpoint (Cloudflare returns at most per_page per call).
+      def paginate(path, per_page:, params: {})
+        items = []
+        page = 1
+        loop do
+          data = request(:get, path, params: params.merge(page: page, per_page: per_page))
+          items.concat(data.fetch("result"))
+          break if page >= (data.dig("result_info", "total_pages") || 1)
+
+          page += 1
+        end
+        items
+      end
+
+      # The one record named name/type (and with content `value`, when given).
+      # No match, or several without a value to pick by, is an error - never
+      # a silent pick of the first.
+      def find_record(zone, name:, type:, value: nil)
+        matches = request(:get, "zones/#{zone_id(zone)}/dns_records",
+                          params: { name: fqdn(zone, name), type: type }).fetch("result")
+        matches = matches.select { |r| r["content"] == value } if value
+        if matches.empty?
+          with_value = value ? " with value '#{value}'" : ""
+          raise ProviderError, "no #{type} record named '#{name}'#{with_value} found in zone '#{zone}'"
+        end
+        raise AmbiguousRecordError.new(name, type, matches.map { |r| r["content"] }) if matches.size > 1
+
+        matches.first
+      end
+
+      # Cloudflare's name filter matches only full names; the CLI also accepts
+      # names relative to the zone ("www" for www.example.com).
+      def fqdn(zone, name)
+        name == zone || name.end_with?(".#{zone}") ? name : "#{name}.#{zone}"
       end
 
       def zone_id(zone)

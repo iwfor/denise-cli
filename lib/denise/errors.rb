@@ -52,6 +52,16 @@ module Denise
     end
   end
 
+  class AmbiguousRecordError < Error
+    def initialize(name, type, values)
+      super("record '#{name}' has #{values.size} #{type} records (#{values.join(', ')}); " \
+            "pick one with --old-value")
+    end
+  end
+
+  # A provider that can't do what was asked (no in-place update, no proxy flag).
+  class UnsupportedOperationError < Error; end
+
   class AmbiguousZoneError < Error
     def initialize(zone_name, aliases)
       super("zone '#{zone_name}' exists under multiple sources (#{aliases.join(', ')}); specify -p/--provider")

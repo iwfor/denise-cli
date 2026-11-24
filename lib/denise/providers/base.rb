@@ -21,6 +21,24 @@ module Denise
         raise NotImplementedError, "#{self.class} must implement #delete_record"
       end
 
+      # update_record(zone:, name:, type:, value:, old_value: nil, ttl: nil, proxied: nil)
+      #
+      # Changes an existing record in place, keeping whatever isn't passed
+      # (nil ttl/proxied = unchanged). old_value picks one record when a name
+      # has several of `type`. Only providers with an update API override
+      # this: emulating it with delete + create would leave the name missing
+      # in between, which is the reason the command exists.
+      def update_record(**)
+        raise UnsupportedOperationError,
+              "#{provider_label} has no in-place record update; use remove-record and add-record"
+      end
+
+      # Whether create_record/update_record accept `proxied:` (Cloudflare's
+      # orange cloud). The CLI refuses --proxied for providers without it.
+      def supports_proxied?
+        false
+      end
+
       def list_records(zone:)
         raise NotImplementedError, "#{self.class} must implement #list_records"
       end
@@ -32,6 +50,10 @@ module Denise
       end
 
       private
+
+      def provider_label
+        self.class.name.split("::").last
+      end
 
       def connection
         @connection ||= build_connection

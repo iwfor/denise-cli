@@ -17,6 +17,8 @@ module Denise
 
     TOKEN_OPTION_DESC = "API token (aws: ACCESS_KEY_ID:SECRET_ACCESS_KEY). Avoid: it's left in shell history " \
                         "and visible in `ps`. Omit it to be prompted securely, or pipe the token on stdin"
+    PROXIED_OPTION_DESC = "Cloudflare only: --proxied sends traffic through Cloudflare (orange cloud), " \
+                          "--no-proxied makes it DNS-only"
 
     def initialize(*args)
       super
@@ -190,15 +192,39 @@ module Denise
                         "from --value when it's an IPv4/IPv6 address"
     method_option :value, required: true, desc: "Record value"
     method_option :ttl, type: :numeric, desc: "Time to live in seconds"
+    method_option :proxied, type: :boolean, desc: PROXIED_OPTION_DESC
     def add_record(name)
       zone, value, ttl = options.values_at("zone", "value", "ttl")
       type = options[:type] || RecordTypes.infer(value)
       alias_name = resolve_provider_alias(zone: zone)
+      client = provider_client(alias_name)
+      proxied = Proxied.option(client, options[:proxied])
 
-      provider_client(alias_name).create_record(zone: zone, name: name, type: type, value: value, ttl: ttl)
+      client.create_record(zone: zone, name: name, type: type, value: value, ttl: ttl, **proxied)
       @record_log.add(alias_name: alias_name, action: "add", zone: zone,
-                      record: { "name" => name, "type" => type, "value" => value, "ttl" => ttl })
+                      record: { "name" => name, "type" => type, "value" => value, "ttl" => ttl,
+                                **proxied.transform_keys(&:to_s) })
       say "Added #{type} record '#{name}' to zone '#{zone}' (#{alias_name})."
+    rescue Error => e
+      error_exit(e)
+    end
+
+    desc "update-record NAME", "Change an existing record in place, keeping its other settings (Cloudflare only)"
+    method_option :zone, aliases: "-z", required: true, desc: "Zone the record belongs to"
+    method_option :type, desc: "Record type of the record to change; required only if the name is ambiguous"
+    method_option :value, required: true, desc: "New record value"
+    method_option :old_value, desc: "Current value of the record to change, when the name has several of that type"
+    method_option :ttl, type: :numeric, desc: "New time to live in seconds (default: unchanged)"
+    method_option :proxied, type: :boolean, desc: "#{PROXIED_OPTION_DESC} (default: unchanged)"
+    def update_record(name)
+      zone = options[:zone]
+      alias_name = resolve_provider_alias(zone: zone)
+      client = provider_client(alias_name)
+      old = RecordTypes.find(client.list_records(zone: zone), name, options[:type])
+
+      new = client.update_record(zone: zone, name: name, type: old["type"], value: options[:value],
+                                 **update_options(client))
+      report_update(alias_name, zone, old, new)
     rescue Error => e
       error_exit(e)
     end
@@ -210,12 +236,12 @@ module Denise
       alias_name = resolve_provider_alias(zone: zone)
 
       records = provider_client(alias_name).list_records(zone: zone)
-      rows = records.map { |r| [r["name"], r["type"], r["value"], r["ttl"]] }
+      rows = records.map { |r| [r["name"], r["type"], r["value"], r["ttl"], Proxied.cell(r)] }
       if rows.empty?
         say "No records found for '#{zone}'."
         return
       end
-      Table.print([%w[NAME TYPE VALUE TTL], *rows])
+      Table.print([%w[NAME TYPE VALUE TTL PROXIED], *rows])
     rescue Error => e
       error_exit(e)
     end
@@ -285,6 +311,19 @@ module Denise
     def provider_client(alias_name)
       src = @config.source(alias_name)
       Providers.client_for(src["provider"], token: @config.token_for(alias_name))
+    end
+
+    # update-record's optional changes; nil ttl/proxied mean "unchanged".
+    def update_options(client)
+      { ttl: options[:ttl], old_value: options[:old_value], **Proxied.option(client, options[:proxied]) }
+    end
+
+    def report_update(alias_name, zone, old, new)
+      old_value = options[:old_value] || old["value"]
+      @record_log.add(alias_name: alias_name, action: "update", zone: zone,
+                      record: new.merge("old_value" => old_value))
+      say "Updated #{old['type']} record '#{old['name']}' in zone '#{zone}' (#{alias_name}): " \
+          "#{old_value} -> #{new['value']}#{Proxied.note(new)}."
     end
 
     def sync_zones_for(alias_name)

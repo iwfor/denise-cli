@@ -51,7 +51,7 @@ RSpec.describe Denise::Completions do
     it "has a case branch offering each command's flags" do
       script = described_class.bash_script
 
-      expect(script).to include('add-record) COMPREPLY=($(compgen -W "-z --zone --type --value --ttl ' \
+      expect(script).to include('add-record) COMPREPLY=($(compgen -W "-z --zone --type --value --ttl --proxied ' \
                                 '-p --provider -v --verbose -h --help" -- "$cur")) ;;')
     end
 
@@ -76,7 +76,7 @@ RSpec.describe Denise::Completions do
       script = described_class.zsh_script
 
       expect(script).to include(
-        "add-record) flags=(-z --zone --type --value --ttl -p --provider -v --verbose -h --help) ;;"
+        "add-record) flags=(-z --zone --type --value --ttl --proxied -p --provider -v --verbose -h --help) ;;"
       )
     end
 

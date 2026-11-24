@@ -137,6 +137,91 @@ RSpec.describe Denise::CLI do
         silence_output { described_class.start(%w[list-records -z untracked.com]) }
       end.to raise_error(SystemExit)
     end
+
+    it "shows a PROXIED column for providers that report it" do
+      client = instance_double(Denise::Providers::Dreamhost)
+      allow(Denise::Providers).to receive(:client_for).and_return(client)
+      allow(client).to receive(:list_records)
+        .and_return([{ "name" => "www", "type" => "CNAME", "value" => "t.example.net", "ttl" => 1, "proxied" => true },
+                     { "name" => "mail", "type" => "A", "value" => "1.2.3.4", "ttl" => 1, "proxied" => false }])
+
+      output = capture_stdout { described_class.start(%w[list-records -z example.com]) }
+
+      expect(output.lines.first).to include("PROXIED")
+      expect(output.lines[1].chomp).to match(/www .* yes\z/)
+      expect(output.lines[2].chomp).to match(/mail .* no\z/)
+    end
+  end
+
+  describe "--proxied" do
+    it "passes proxied: true to a provider that supports it" do
+      client = instance_double(Denise::Providers::Cloudflare, supports_proxied?: true)
+      allow(Denise::Providers).to receive(:client_for).and_return(client)
+      expect(client).to receive(:create_record)
+        .with(zone: "example.com", name: "www", type: "CNAME", value: "t.example.net", ttl: nil, proxied: true)
+
+      silence_output do
+        described_class.start(%w[add-record www --type CNAME --value t.example.net --proxied -z example.com])
+      end
+    end
+
+    it "is refused for a provider without a proxy, before any change" do
+      client = instance_double(Denise::Providers::Dreamhost, supports_proxied?: false)
+      allow(Denise::Providers).to receive(:client_for).and_return(client)
+      expect(client).not_to receive(:create_record)
+
+      expect do
+        silence_output do
+          described_class.start(%w[add-record www --type CNAME --value t.example.net --no-proxied -z example.com])
+        end
+      end.to raise_error(SystemExit)
+    end
+  end
+
+  describe "update-record" do
+    let(:client) { instance_double(Denise::Providers::Cloudflare, supports_proxied?: true) }
+    let(:old) { { "name" => "www", "type" => "CNAME", "value" => "old.example.net", "ttl" => 1, "proxied" => true } }
+
+    before do
+      allow(Denise::Providers).to receive(:client_for).and_return(client)
+      allow(client).to receive(:list_records).with(zone: "example.com").and_return([old])
+    end
+
+    it "updates in place, leaving proxied alone unless asked, and logs old and new values" do
+      expect(client).to receive(:update_record)
+        .with(zone: "example.com", name: "www", type: "CNAME", value: "new.example.net", ttl: nil, old_value: nil)
+        .and_return(old.merge("value" => "new.example.net"))
+
+      output = capture_stdout do
+        described_class.start(%w[update-record www --value new.example.net -z example.com])
+      end
+
+      expect(output).to include("old.example.net -> new.example.net (proxied)")
+      entry = JSON.parse(File.readlines(Denise::Paths.records_log_file).last)
+      expect(entry).to include("action" => "update", "value" => "new.example.net", "old_value" => "old.example.net")
+    end
+
+    it "passes --no-proxied, --ttl and --old-value through" do
+      expect(client).to receive(:update_record)
+        .with(zone: "example.com", name: "www", type: "CNAME", value: "new.example.net", ttl: 300,
+              old_value: "old.example.net", proxied: false)
+        .and_return(old.merge("value" => "new.example.net", "proxied" => false))
+
+      silence_output do
+        described_class.start(%w[update-record www --value new.example.net --ttl 300 --old-value old.example.net
+                                 --no-proxied -z example.com])
+      end
+    end
+
+    it "exits with an error when the provider can't update in place" do
+      dreamhost = Denise::Providers::Dreamhost.new(token: "t1")
+      allow(Denise::Providers).to receive(:client_for).and_return(dreamhost)
+      allow(dreamhost).to receive(:list_records).and_return([old])
+
+      expect do
+        silence_output { described_class.start(%w[update-record www --value new.example.net -z example.com]) }
+      end.to raise_error(SystemExit)
+    end
   end
 
   describe "remove-record" do

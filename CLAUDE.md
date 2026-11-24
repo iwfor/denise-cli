@@ -22,12 +22,15 @@ A thrown together simple DNS manager for hobbyists, written in Ruby.
   Secret Service (`secret-tool`) (see Token storage below)
 - `lib/denise/providers.rb` — registry of known providers, their default aliases, and `client_for` factory
 - `lib/denise/providers/base.rb` — shared provider client interface
-  (`create_record`/`delete_record`/`list_records`/`list_zones`)
+  (`create_record`/`delete_record`/`list_records`/`list_zones`; `update_record` and `supports_proxied?` default to
+  unsupported - only Cloudflare overrides them)
 - `lib/denise/providers/cloudflare.rb` — Cloudflare v4 API client (Bearer token, zone-id lookup/cache)
 - `lib/denise/providers/dreamhost.rb` — DreamHost API client (key-based query auth, no zone/TTL params)
 - `lib/denise/providers/aws.rb` — AWS Route 53 client (hand-rolled SigV4 signing, REST-XML API)
 - `lib/denise/paths.rb` — config directory/file path resolution (`DENISE_CONFIG_DIR` override for tests)
 - `lib/denise/completions.rb` — bash/zsh completion script generation
+- `lib/denise/proxied.rb` — Cloudflare proxy flag (orange cloud): `--proxied`/`--no-proxied` → provider kwargs, and the
+  PROXIED column/notes; refused for providers without `supports_proxied?`
 - `lib/denise/record_types.rb` — infers/resolves a record's type when `--type` is omitted (see Record type
   inference below)
 - `lib/denise/record_log.rb` — appends add/remove record changes to `records.log` (see Record change log below)
