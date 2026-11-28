@@ -25,7 +25,7 @@ A thrown together simple DNS manager for hobbyists, written in Ruby.
   (`create_record`/`delete_record`/`list_records`/`list_zones`; `update_record` and `supports_proxied?` default to
   unsupported - only Cloudflare overrides them)
 - `lib/denise/providers/cloudflare.rb` — Cloudflare v4 API client (Bearer token, zone-id lookup/cache)
-- `lib/denise/providers/dreamhost.rb` — DreamHost API client (key-based query auth, no zone/TTL params)
+- `lib/denise/providers/dreamhost.rb` — DreamHost v1 REST API client (Bearer key, async writes polled via tasks, no TTL)
 - `lib/denise/providers/aws.rb` — AWS Route 53 client (hand-rolled SigV4 signing, REST-XML API)
 - `lib/denise/paths.rb` — config directory/file path resolution (`DENISE_CONFIG_DIR` override for tests)
 - `lib/denise/completions.rb` — bash/zsh completion script generation
@@ -180,11 +180,17 @@ without an API call per command - and a typoed `-z` should fail fast with `Unkno
 reaching the live API blind (`Config#zone?`). Zones are actively synced from the live API by
 `add-provider`/`refresh-zones` (see above); `list-zones` just reads that locally-synced list.
 
-DreamHost's `#list_zones` has no dedicated API to call: DreamHost removed its account/domain-management
-commands, leaving `dns-list_records` (which returns every record for every domain on the account, each
-tagged with a `zone`) as the only way to discover which zones exist - so it's derived as the unique `zone`
-values from that same call `#list_records` already uses. A domain with zero DNS records wouldn't show up this
-way, but that's a real limitation of DreamHost's current API, not a bug in ours.
+DreamHost uses its v1 REST API (`https://api.dreamhost.com/v1/`, spec at
+`https://developers.dreamhost.com/spec/external/json?version=v1`); the legacy `?cmd=dns-...` API was retired
+2026-11-22, and v1 needs new keys. The DNS API has no zone listing, so `#list_zones` pages through
+`GET websites` and takes each website's `domain` - the key needs Websites read alongside DNS read/write.
+Websites include `dns_only` and `parked` domains, but a domain that isn't a website at all would be missing,
+and `refresh-zones` would then drop it locally. Writes are asynchronous: `POST`/`DELETE dns/{zone}` return 202
+with a task, which `Dreamhost#await` polls (`tasks/{id}`, up to `TASK_TIMEOUT`) until `success`, raising
+`ProviderError` otherwise - so a change is never reported or logged to `records.log` before DreamHost has
+made it. Deletes must send the record's exact canonical `value` from the live list. MX isn't writable through
+the API yet and CAA/SRV/NAPTR need structured fields, so `create_record` refuses those types
+(`Dreamhost::VALUE_FIELD` lists the supported ones).
 
 Every provider client subclasses `Denise::Providers::Base` and implements `create_record`/`delete_record`/
 `list_records`, raising `Denise::ProviderError` on any API/network failure. Each client's private `request`
@@ -271,11 +277,10 @@ the response status to stderr (`warn`, gated on `Denise.verbose`) - stdout stays
 output.
 
 **The secret-safety rule that shapes this:** `#log` is only ever called with method/path/params/body/status -
-never with headers, and never with `@token`/`@secret_access_key` directly. This matters most for DreamHost,
-where the plaintext API key travels as a `key=` query param on every request: `Dreamhost#request` builds its
-log line from `cmd`/`params` (the method's own arguments, which never include `key`), not from the `query`
-hash actually sent over the wire (which does). Cloudflare and AWS carry their secrets in the `Authorization`
-header instead, which `#log` never touches at all. `spec/denise/providers/*_spec.rb` has an explicit
+never with headers, and never with `@token`/`@secret_access_key` directly. Every provider carries its secret
+in the `Authorization` header (a Bearer token for Cloudflare and DreamHost, a SigV4 signature for AWS), which
+`#log` never touches. The two JSON clients share `Base#send_json`, which logs method/path/query/body and the
+status only. `spec/denise/providers/*_spec.rb` has an explicit
 "verbose logging" example per provider asserting the token/secret string is absent from captured output, not
 just that logging happens - see `capture_stderr` in `spec/spec_helper.rb`.
 

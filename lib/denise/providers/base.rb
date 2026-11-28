@@ -63,11 +63,29 @@ module Denise
         raise NotImplementedError, "#{self.class} must implement #build_connection"
       end
 
+      # One JSON-API call (Cloudflare, DreamHost): logs method/path/query/body
+      # and the status - never headers, which is where the Bearer token lives -
+      # and returns the raw response for the client's own #parse.
+      def send_json(method, path, params: nil, body: nil, headers: {})
+        query = params ? "?#{params.map { |k, v| "#{k}=#{v}" }.join('&')}" : ""
+        log("#{method.to_s.upcase} #{path}#{query}#{" body=#{body.to_json}" if body}")
+
+        response = perform do
+          connection.public_send(method) do |req|
+            req.url(path, params || {})
+            req.headers.update(headers)
+            req.body = body.to_json if body
+          end
+        end
+        log("-> HTTP #{response.status}")
+        response
+      end
+
       # Runs one HTTP call, turning Faraday's network-level failures (refused
       # connection, DNS, timeout, TLS) into ProviderError, so the CLI reports
       # `denise: ...` instead of crashing with a backtrace. The message is
-      # scrubbed of #secrets as defense in depth: DreamHost's key travels in
-      # the request URL, so an adapter error that echoed the URL would carry it.
+      # scrubbed of #secrets as defense in depth, in case an adapter error
+      # echoes a request detail that carries one.
       def perform
         yield
       rescue Faraday::Error => e

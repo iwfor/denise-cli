@@ -103,17 +103,7 @@ module Denise
       # params/body here are only ever zone names, record names/types/values,
       # and IDs - never a token or header, so it's always safe to log in full.
       def request(method, path, params: nil, body: nil)
-        query = params ? "?#{params.map { |k, v| "#{k}=#{v}" }.join('&')}" : ""
-        log("#{method.to_s.upcase} #{path}#{query}#{" body=#{body.to_json}" if body}")
-
-        response = perform do
-          connection.public_send(method) do |req|
-            req.url(path, params || {})
-            req.body = body.to_json if body
-          end
-        end
-        log("-> HTTP #{response.status}")
-        parse(response)
+        parse(send_json(method, path, params: params, body: body))
       end
 
       def build_connection
