@@ -31,8 +31,10 @@ module Denise
         "CNAME" => "content", "TXT" => "content", "NS" => "content", "PTR" => "content", "ALIAS" => "content"
       }.freeze
 
-      TASK_TIMEOUT = 30 # seconds to wait for a write's task to finish
-      TASK_POLL_INTERVAL = 1
+      # Seconds to wait for a write's task to finish. Tasks routinely take
+      # minutes (a CNAME add took 185s on 2026-11-28), so this is generous.
+      TASK_TIMEOUT = 300
+      TASK_POLL_INTERVAL = 5
       WEBSITES_PAGE_SIZE = 100 # the API's maximum
 
       def initialize(token:, connection: nil, sleeper: ->(seconds) { sleep(seconds) })
@@ -110,8 +112,13 @@ module Denise
         request(method, "dns/#{zone}", body: body, headers: { "Idempotency-Key" => SecureRandom.uuid })
       end
 
+      # Prints one progress line to stderr (not gated on -v) when the task
+      # isn't done immediately, so a multi-minute wait doesn't look like a hang.
       def await(task)
         polls = TASK_TIMEOUT / TASK_POLL_INTERVAL
+        if task["status"] == "scheduled"
+          warn "Waiting for DreamHost to apply the change (task #{task['taskId']}; this can take a few minutes)..."
+        end
         while task["status"] == "scheduled" && polls.positive?
           @sleeper.call(TASK_POLL_INTERVAL)
           polls -= 1
@@ -120,8 +127,9 @@ module Denise
         return task if task["status"] == "success"
 
         if task["status"] == "scheduled"
-          raise ProviderError, "DreamHost task #{task['taskId']} is still pending after #{TASK_TIMEOUT}s; " \
-                               "check list-records later to see whether it took effect"
+          raise ProviderError, "DreamHost accepted the change but task #{task['taskId']} is still pending " \
+                               "after #{TASK_TIMEOUT}s; it may still apply - check list-records later " \
+                               "(records.log was not updated)"
         end
         raise ProviderError, "DreamHost task #{task['taskId']} ended with status '#{task['status']}'"
       end

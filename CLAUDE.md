@@ -185,10 +185,13 @@ DreamHost uses its v1 REST API (`https://api.dreamhost.com/v1/`, spec at
 2026-11-22, and v1 needs new keys. The DNS API has no zone listing, so `#list_zones` pages through
 `GET websites` and takes each website's `domain` - the key needs Websites read alongside DNS read/write.
 Websites include `dns_only` and `parked` domains, but a domain that isn't a website at all would be missing,
-and `refresh-zones` would then drop it locally. Writes are asynchronous: `POST`/`DELETE dns/{zone}` return 202
-with a task, which `Dreamhost#await` polls (`tasks/{id}`, up to `TASK_TIMEOUT`) until `success`, raising
+and `refresh-zones` would then drop it locally. Subdomain websites (`files.example.com`) are skipped when their
+parent is listed too - their DNS is just a view onto the parent zone's records. Writes are asynchronous:
+`POST`/`DELETE dns/{zone}` return 202 with a task, which `Dreamhost#await` polls (`tasks/{id}`, every 5s for up
+to `TASK_TIMEOUT` = 5 minutes, printing one "Waiting for DreamHost..." line to stderr) until `success`, raising
 `ProviderError` otherwise - so a change is never reported or logged to `records.log` before DreamHost has
-made it. Deletes must send the record's exact canonical `value` from the live list. MX isn't writable through
+made it. Tasks routinely take minutes: a CNAME add took 185s, well past the original 30s timeout. Deletes
+must send the record's exact canonical `value` from the live list. MX isn't writable through
 the API yet and CAA/SRV/NAPTR need structured fields, so `create_record` refuses those types
 (`Dreamhost::VALUE_FIELD` lists the supported ones).
 

@@ -65,14 +65,29 @@ RSpec.describe Denise::Providers::Dreamhost do
       provider.create_record(zone: "example.com", name: "", type: "AAAA", value: "2001:db8::1")
     end
 
-    it "polls the returned task until it succeeds" do
+    it "polls the returned task until it succeeds, saying once on stderr that it's waiting" do
       stubs.post("/v1/dns/example.com") { [202, {}, task("scheduled")] }
       stubs.get("/v1/tasks/928144") { [200, {}, task("scheduled")] }
       stubs.get("/v1/tasks/928144") { [200, {}, task("success")] }
 
-      provider.create_record(zone: "example.com", name: "www", type: "A", value: "1.2.3.4")
+      output = capture_stderr do
+        provider.create_record(zone: "example.com", name: "www", type: "A", value: "1.2.3.4")
+      end
 
-      expect(sleeps).to eq([1, 1])
+      expect(sleeps).to eq([described_class::TASK_POLL_INTERVAL] * 2)
+      expect(output.lines.size).to eq(1)
+      expect(output).to include("Waiting for DreamHost to apply the change (task 928144")
+    end
+
+    it "prints nothing while waiting when the task has already succeeded" do
+      stubs.post("/v1/dns/example.com") { [202, {}, task("success")] }
+
+      output = capture_stderr do
+        provider.create_record(zone: "example.com", name: "www", type: "A", value: "1.2.3.4")
+      end
+
+      expect(output).to eq("")
+      expect(sleeps).to be_empty
     end
 
     it "raises a ProviderError when the task fails" do
@@ -88,8 +103,8 @@ RSpec.describe Denise::Providers::Dreamhost do
       stubs.get("/v1/tasks/928144") { [200, {}, task("scheduled")] }
 
       expect do
-        provider.create_record(zone: "example.com", name: "www", type: "A", value: "1.2.3.4")
-      end.to raise_error(Denise::ProviderError, /task 928144 is still pending/)
+        capture_stderr { provider.create_record(zone: "example.com", name: "www", type: "A", value: "1.2.3.4") }
+      end.to raise_error(Denise::ProviderError, /accepted the change but task 928144 is still pending.*may still apply/)
       expect(sleeps.sum).to eq(described_class::TASK_TIMEOUT)
     end
 
